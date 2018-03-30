@@ -1,0 +1,18 @@
+[package]
+name = "ml_dataflow"
+version = "0.1.0"
+authors = ["Stefan Kaufhold <cere@fastmail.fm>"]
+
+[dependencies]
+timely="0.5"
+timely_communication="0.5"
+abomonation="0.5"
+abomonation_derive="0.3"
+log="0.4"
+#pretty_env_logger="0.2"
+ndarray="0.11"
+serde="1.0"
+serde_derive="1.0"
+csv="1.0.0-beta.5"
+failure="0.1"
+derive_more = "0.9.0"
