@@ -128,6 +128,16 @@ where
         Ok(rows?)
     }
 
+    fn all(&mut self) -> Result<Vec<Row>> {
+        let rows = self.builder
+            .clone()
+            .try_into()?
+            .into_deserialize::<Row>()
+            .map(|r| r.map_err(::failure::Error::from))
+            .collect::<Result<Vec<_>>>();
+        Ok(rows?)
+    }
+
     fn select(&mut self, indices: &[usize]) -> Result<Vec<Row>> {
         let rows_iter = self.builder
             .clone()

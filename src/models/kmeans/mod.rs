@@ -1,21 +1,21 @@
 //! The K-Means Clustering Algorithm.
 
-use data::dataflow::AsyncResult;
+use ndarray::indices;
 use self::aggregator::*;
-use data::providers::IntSliceIndex;
+use data::dataflow::AsyncResult;
+use data::providers::{IntSliceIndex};
 use data::providers::{DataSource, DataSourceSpec};
 use data::serialization::*;
 use models::UnSupModel;
 use ndarray::prelude::*;
-use ndarray::ScalarOperand;
-use ndarray_linalg::Scalar;
+use ndarray::{NdProducer, ScalarOperand, Zip};
+use ndarray_linalg::{Scalar, Norm};
 use num_traits::cast::FromPrimitive;
 use num_traits::Float;
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::marker::PhantomData;
-use std::ops::AddAssign;
-use std::ops::DivAssign;
+use std::ops::{AddAssign, DivAssign, Sub};
 use std::sync::mpsc;
 use timely::dataflow::channels::pact::Pipeline;
 use timely::progress::Timestamp;
@@ -33,6 +33,8 @@ pub mod initializers;
 
 pub use self::convergence::*;
 
+const CHUNK_SIZE: usize = 5000;
+
 pub struct Kmeans<Item: Data, Init: KMeansInitializer<Item>> {
     n_clusters: usize,
     cols: usize,
@@ -42,11 +44,7 @@ pub struct Kmeans<Item: Data, Init: KMeansInitializer<Item>> {
 }
 
 impl<Item: Data, Init: KMeansInitializer<Item>> Kmeans<Item, Init> {
-    pub fn new(
-        n_clusters: usize,
-        cols: usize,
-        end_criteria: ConvergenceCriteria<Item>,
-    ) -> Self {
+    pub fn new(n_clusters: usize, cols: usize, end_criteria: ConvergenceCriteria<Item>) -> Self {
         Kmeans {
             n_clusters,
             cols,
@@ -55,9 +53,13 @@ impl<Item: Data, Init: KMeansInitializer<Item>> Kmeans<Item, Init> {
             phantom_data: PhantomData,
         }
     }
+
+    pub fn centroids(&mut self) -> Option<ArrayView2<Item>> {
+        self.centroids.get().ok().map(|a| a.view())
+    }
 }
 
-impl<Item, Init> UnSupModel<AbomonableArray2<Item>, Vec<(Array1<Item>, usize)>>
+impl<Item, Init> UnSupModel<AbomonableArray2<Item>, AbomonableArray2<usize>>
     for Kmeans<Item, Init>
 where
     Item: ExchangeData
@@ -67,17 +69,73 @@ where
         + Display
         + ScalarOperand
         + AddAssign<Item>
-        + DivAssign<Item>,
+        + DivAssign<Item>
+        + Sub<Item>,
     Init: KMeansInitializer<Item>,
 {
     fn predict<S: Scope, Sp: DataSourceSpec<AbomonableArray2<Item>>>(
         &mut self,
-        _scope: &mut S,
-        _inputs: Sp,
-    ) -> Result<Vec<(Array1<Item>, usize)>> {
-        let results = self.centroids.get()?.view();
-        println!("{}", results);
-        unimplemented!()
+        scope: &mut S,
+        inputs: Sp,
+    ) -> Result<Stream<S, AbomonableArray2<usize>>> {
+        let centroids = self.centroids.get()?.view();
+
+        let mut provider = inputs.to_provider()?;
+        let points: Array2<_> = provider.all()?.into();
+
+        let mut assignments = unsafe { Array2::<usize>::uninitialized((points.rows(), 2)) };
+        Zip::from(assignments.genrows_mut())
+            .and(points.genrows())
+            .and(indices(points.genrows().raw_dim()))
+            .apply(|mut assignment, point, point_idx| {
+                let centroid_index = centroids.outer_iter()
+                    .map(|centroid| {
+                        (&point - &centroid).norm_l2()
+                    })
+                    .enumerate()
+                    .min_by(|&(_, a), &(_, b)| a.partial_cmp(&b).unwrap_or(::std::cmp::Ordering::Less))
+                    .unwrap()
+                    .0;
+                assignment[0] = point_idx;
+                assignment[1] = centroid_index;
+            });
+
+        Ok(vec![AbomonableArray::from(assignments)].to_stream(scope))
+
+        // TODO: finish distributing prediction work across different workers
+        /*let worker_index = scope.index();
+        let points_stream = provider
+            .chunk_indices(CHUNK_SIZE)
+            .unwrap()
+            .enumerate()
+            .to_stream(scope)
+            .exchange(|&(chunk_num, _)| chunk_num as u64)
+            .map(move |(_, slice_index)| {
+                debug!("{:?}", slice_index);
+                let mut provider = inputs.clone().to_provider().unwrap();
+                (
+                    slice_index,
+                    AbomonableArray::from(provider.slice(slice_index).unwrap()),
+                )
+            })
+            .map(|(slice_index, chunk_a)| {
+                let chunk: Array2<_> = chunk_a.into();
+                let assignments = Array2::<usize>::uninitialized((chunk.rows(), 2));
+                chunk
+                    .outer_iter()
+                    .enumerate()
+                    .map(|(i, point)| {
+                        let centroid_index = centroids.outer_iter()
+                            .map(move |centroid| {
+                                (&point - &centroid).norm_l2()
+                            })
+                            .enumerate()
+                            .min_by(|&(_, a), &(_, b)| a.partial_cmp(&b).unwrap_or(::std::cmp::Ordering::Less))
+                            .unwrap()
+                            .0;
+                        (slice_index.absolute_index(i), centroid_index)
+                    })
+            });*/
     }
 
     fn train<S: Scope, D: DataSourceSpec<AbomonableArray2<Item>>>(
@@ -102,16 +160,15 @@ where
             initial_centroids[0].view()
         );
 
-        let chunk_size: usize = 5000; // TODO: put this somewhere else, maybe make it configurable
-
         let (result_sender, result_receiver) = mpsc::channel();
         self.centroids = AsyncResult::Receiver(result_receiver);
 
         scope.scoped(|inner| {
+            let worker_index = inner.index();
             debug!("Constructing worker {}", inner.index());
 
             let points_stream = provider
-                .chunk_indices(chunk_size)
+                .chunk_indices(CHUNK_SIZE)
                 .unwrap()
                 .enumerate()
                 .to_stream(inner)
@@ -129,6 +186,7 @@ where
 
             let (done, next_iteration) = initial_centroids
                 .to_stream(inner)
+                .filter(move |_| worker_index == 0)
                 .concat(&loop_stream)
                 // checks whether the convergence criteria are met and aborts the loop
                 .end_condition(end_criteria);
@@ -138,7 +196,8 @@ where
                 .assign_points(&points_stream)
                 .exchange(|_| 0u64)
                 .accumulate_statistics(AggregationStatistics::new(n_clusters, cols))
-                .map(|stats| {
+                .map(move |stats| {
+                    debug!("Worker {}: Aggregated all assignments, calculating new centroids", worker_index);
                     AggregationStatistics::from(stats)
                         .centroid_estimate()
                         .into()
@@ -182,7 +241,7 @@ where
 
             move |in_centroids, in_points, out| {
                 in_centroids.for_each(|time, data| {
-                    debug!("Worker {} receiving {} centroids", worker_index, data.len());
+                    debug!("Worker {} receiving {} sets of centroids", worker_index, data.len());
                     let entry = centroid_stash.entry(time.clone()).or_insert_with(Vec::new);
                     entry.extend(data.drain(..));
                 });
@@ -201,7 +260,7 @@ where
                 for (cap, centroid_list) in centroid_stash.iter_mut() {
                     // if neither input can produce data at `time`, compute statistics
                     if frontiers.iter().all(|f| !f.less_equal(cap.time())) {
-                        debug!("process chunks");
+                        debug!("Worker {} processing centroid/point data", worker_index);
                         let mut session = out.session(&cap);
 
                         for centroids in centroid_list.drain(..) {
@@ -247,6 +306,7 @@ impl<S: Scope<Timestamp = Product<T, usize>>, T: Timestamp, D: Data + Display> E
         Stream<S, AbomonableArray2<D>>,
         Stream<S, AbomonableArray2<D>>,
     ) {
+        let worker = self.scope().index();
         let mut outputs = self.unary_frontier(Pipeline, "CheckConvergence", |_| {
             let mut iteration_count = 0;
             let mut centroid_stash: HashMap<_, AbomonableArray2<D>> = HashMap::new();
@@ -257,6 +317,7 @@ impl<S: Scope<Timestamp = Product<T, usize>>, T: Timestamp, D: Data + Display> E
 
                     for new_centroids in data.drain(..) {
                         let done = if let Some(previous_centroids) = centroid_stash.remove(&cap) {
+                            debug!("Checking convergence on worker {}", worker);
                             check.converges(
                                 &previous_centroids.view(),
                                 &new_centroids.view(),
@@ -278,6 +339,7 @@ impl<S: Scope<Timestamp = Product<T, usize>>, T: Timestamp, D: Data + Display> E
                                 cap.delayed(&Product::new(cap.outer.clone(), cap.inner + 1));
                             centroid_stash.insert(delayed_cap.clone(), new_centroids.clone());
                         }
+
                         output.session(&cap).give((done, new_centroids));
                     }
                 });

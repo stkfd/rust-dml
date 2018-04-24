@@ -43,6 +43,9 @@ pub trait DataSource<Collection: IndexableData> {
     /// Fetch a partition of the items in this `DataSource`
     fn slice(&mut self, idx: Collection::SliceIndex) -> Result<Collection>;
 
+    /// Fetch the complete contents of the data source
+    fn all(&mut self) -> Result<Collection>;
+
     /// Select specific rows from the data source
     fn select(&mut self, indices: &[<Collection::SliceIndex as IndexesSlice>::Idx]) -> Result<Collection>;
 

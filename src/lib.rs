@@ -9,7 +9,6 @@ extern crate failure;
 extern crate itertools;
 #[macro_use]
 extern crate log;
-extern crate pretty_env_logger;
 extern crate serde;
 #[cfg(test)]
 #[macro_use]

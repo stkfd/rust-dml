@@ -1,5 +1,5 @@
 use data::providers::{DataSourceSpec, IndexableData};
-use timely::dataflow::Scope;
+use timely::dataflow::{Scope, Stream};
 use Result;
 
 pub mod kmeans;
@@ -14,7 +14,7 @@ pub mod kmeans;
 
 pub trait UnSupModel<T: IndexableData, U> {
     /// Predict output from inputs.
-    fn predict<S: Scope, Sp: DataSourceSpec<T>>(&mut self, scope: &mut S, inputs: Sp) -> Result<U>;
+    fn predict<S: Scope, Sp: DataSourceSpec<T>>(&mut self, scope: &mut S, inputs: Sp) -> Result<Stream<S, U>>;
 
     /// Train the model using inputs.
     fn train<S: Scope, Sp: DataSourceSpec<T>>(&mut self, scope: &mut S, inputs: Sp) -> Result<()>;

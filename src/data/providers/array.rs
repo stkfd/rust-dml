@@ -49,6 +49,12 @@ impl<T: Data + Copy> DataSource<AbomonableArray2<T>> for ArrayProvider<T> {
             .into())
     }
 
+    fn all(&mut self) -> Result<AbomonableArray2<T>> {
+        Ok(self.array
+            .to_owned()
+            .into())
+    }
+
     /// Select specific rows from the data source
     fn select(&mut self, indices: &[usize]) -> Result<AbomonableArray2<T>> {
         Ok(self.array.select(Axis(0), indices).into())
