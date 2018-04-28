@@ -1,15 +1,15 @@
 //! The K-Means Clustering Algorithm.
 
-use ndarray::indices;
 use self::aggregator::*;
 use data::dataflow::AsyncResult;
-use data::providers::{IntSliceIndex};
+use data::providers::IntSliceIndex;
 use data::providers::{DataSource, DataSourceSpec};
 use data::serialization::*;
 use models::UnSupModel;
+use ndarray::indices;
 use ndarray::prelude::*;
 use ndarray::{NdProducer, ScalarOperand, Zip};
-use ndarray_linalg::{Scalar, Norm};
+use ndarray_linalg::{Norm, Scalar};
 use num_traits::cast::FromPrimitive;
 use num_traits::Float;
 use std::collections::HashMap;
@@ -59,7 +59,7 @@ impl<Item: Data, Init: KMeansInitializer<Item>> Kmeans<Item, Init> {
     }
 }
 
-impl<Item, Init> UnSupModel<AbomonableArray2<Item>, AbomonableArray2<usize>>
+impl<Item, Init> UnSupModel<AbomonableArray2<Item>, AbomonableArray2<usize>, AbomonableArray2<Item>>
     for Kmeans<Item, Init>
 where
     Item: ExchangeData
@@ -78,6 +78,7 @@ where
         scope: &mut S,
         inputs: Sp,
     ) -> Result<Stream<S, AbomonableArray2<usize>>> {
+        if scope.index() != 0 { return Ok(vec!().to_stream(scope)); }
         let centroids = self.centroids.get()?.view();
 
         let mut provider = inputs.to_provider()?;
@@ -88,12 +89,13 @@ where
             .and(points.genrows())
             .and(indices(points.genrows().raw_dim()))
             .apply(|mut assignment, point, point_idx| {
-                let centroid_index = centroids.outer_iter()
-                    .map(|centroid| {
-                        (&point - &centroid).norm_l2()
-                    })
+                let centroid_index = centroids
+                    .outer_iter()
+                    .map(|centroid| (&point - &centroid).norm_l2())
                     .enumerate()
-                    .min_by(|&(_, a), &(_, b)| a.partial_cmp(&b).unwrap_or(::std::cmp::Ordering::Less))
+                    .min_by(|&(_, a), &(_, b)| {
+                        a.partial_cmp(&b).unwrap_or(::std::cmp::Ordering::Less)
+                    })
                     .unwrap()
                     .0;
                 assignment[0] = point_idx;
@@ -135,14 +137,13 @@ where
                             .0;
                         (slice_index.absolute_index(i), centroid_index)
                     })
-            });*/
-    }
+            });*/    }
 
     fn train<S: Scope, D: DataSourceSpec<AbomonableArray2<Item>>>(
         &mut self,
         scope: &mut S,
         input_spec: D,
-    ) -> Result<()> {
+    ) -> Result<Stream<S, AbomonableArray2<Item>>> {
         let n_clusters = self.n_clusters;
         let cols = self.cols;
 
@@ -161,9 +162,9 @@ where
         );
 
         let (result_sender, result_receiver) = mpsc::channel();
-        self.centroids = AsyncResult::Receiver(result_receiver);
+        if scope.index() == 0 { self.centroids = AsyncResult::Receiver(result_receiver); }
 
-        scope.scoped(|inner| {
+        let results = scope.scoped(|inner| {
             let worker_index = inner.index();
             debug!("Constructing worker {}", inner.index());
 
@@ -197,18 +198,26 @@ where
                 .exchange(|_| 0u64)
                 .accumulate_statistics(AggregationStatistics::new(n_clusters, cols))
                 .map(move |stats| {
-                    debug!("Worker {}: Aggregated all assignments, calculating new centroids", worker_index);
+                    debug!(
+                        "Worker {}: Aggregated all assignments, calculating new centroids",
+                        worker_index
+                    );
                     AggregationStatistics::from(stats)
                         .centroid_estimate()
                         .into()
                 })
                 .connect_loop(loop_handle);
 
-            done.inspect(|c| debug!("Finished: {}", c.view()))
-                .map(move |c| result_sender.send(c).expect("Extracting result centroids"));
+            done.inspect(move |c| {
+                debug!("worker {}", worker_index);
+                debug!("Finished: {}", c.view());
+                result_sender
+                    .send(c.clone())
+                    .expect("Extracting result centroids");
+            }).leave()
         });
 
-        Ok(())
+        Ok(results)
     }
 }
 
@@ -241,7 +250,11 @@ where
 
             move |in_centroids, in_points, out| {
                 in_centroids.for_each(|time, data| {
-                    debug!("Worker {} receiving {} sets of centroids", worker_index, data.len());
+                    debug!(
+                        "Worker {} receiving {} sets of centroids",
+                        worker_index,
+                        data.len()
+                    );
                     let entry = centroid_stash.entry(time.clone()).or_insert_with(Vec::new);
                     entry.extend(data.drain(..));
                 });

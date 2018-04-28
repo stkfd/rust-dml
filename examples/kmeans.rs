@@ -40,15 +40,15 @@ fn main() {
 
         while root.step() {}
 
-        root.dataflow::<usize, _, _>(|scope| {
-            model
-                .predict(scope, source.clone()).expect("Making predictions for some data")
-                .inspect(|assignments| {
-                    let array: ArrayView<_, _> = assignments.view();
-                    for assignment in array.genrows() {
-                        println!("{} -> {}", assignment[0], assignment[1]);
-                    }
-                });
+        root.dataflow::<usize, _, _>(|scope| {        
+                model
+                    .predict(scope, source.clone()).expect("Making predictions for some data")
+                    .inspect(|assignments| {
+                        let array: ArrayView<_, _> = assignments.view();
+                        for assignment in array.genrows() {
+                            println!("{} -> {}", assignment[0], assignment[1]);
+                        }
+                    });
         });
 
         while root.step() {}
