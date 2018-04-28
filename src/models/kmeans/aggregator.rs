@@ -101,7 +101,13 @@ where
 
         Zip::from(estimates.outer_iter_mut())
             .and(&counts)
-            .apply(|mut sum, &count| sum /= T::from_usize(count).unwrap());
+            .apply(|mut sum, &count| {
+                if count > 0 {
+                    sum /= T::from_usize(count).unwrap()
+                } else {
+                    sum.fill(T::from_usize(0).unwrap())
+                }
+            });
 
         estimates
     }
