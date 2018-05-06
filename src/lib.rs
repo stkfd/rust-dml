@@ -20,6 +20,7 @@ extern crate ndarray;
 extern crate ndarray_linalg;
 extern crate num_traits;
 extern crate rand;
+extern crate float_cmp;
 
 use std::result::Result as StdResult;
 

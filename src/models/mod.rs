@@ -2,6 +2,7 @@ use data::providers::{DataSourceSpec, IndexableData};
 use timely::dataflow::{Scope, Stream};
 use Result;
 
+pub mod spdt;
 pub mod kmeans;
 
 // pub trait SupModel<T, U> {
