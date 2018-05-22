@@ -227,8 +227,10 @@ impl<S: Scope, T: ExchangeData, L: ExchangeData + Hash + Eq + Copy> AggregateHis
     fn aggregate_histograms(&self) -> Stream<S, TreeWithHistograms<T, L>> {
         self.map(|x| (0, x))
             .aggregate::<_, TreeWithHistograms<T, L>, _, _, _>(
-                |_tree, val, agg| {
-                    agg.1.merge(val.1);
+                |_key, (tree, histograms, n_attr), agg| {
+                    agg.0 = tree;
+                    agg.1.merge(histograms);
+                    agg.2 = n_attr;
                 },
                 |_, histograms| histograms,
                 |_| 0_u64,

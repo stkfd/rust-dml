@@ -7,6 +7,7 @@ extern crate timely_communication;
 
 use flexi_logger::Logger;
 use ml_dataflow::models::spdt::*;
+use ml_dataflow::models::spdt::impurity::Gini;
 use ml_dataflow::models::StreamingSupModel;
 use ndarray::prelude::*;
 use timely::dataflow::operators::*;
@@ -20,17 +21,17 @@ fn main() {
         let x = arr2(&[
             [0., 0., 0., 0., 0.],
             [0., 0., 0., 0., 0.],
-            [0., 0., 0., 0., 0.],
-            [0., 0., 0., 0., 0.],
-            [5., 5., 5., 5., 5.],
-            [5., 5., 5., 5., 5.],
-            [5., 5., 5., 5., 5.],
-            [5., 5., 5., 5., 5.],
+            [1., 0., 2., 0., 3.],
+            [1.5, 0., 2.1, 0., 3.],
+            [4.9, 5., 5.1, 5.1, 5.],
+            [5., 5.1, 5., 5., 5.1],
+            [5., 5., 5.2, 5., 5.],
+            [5., 5.1, 5., 5., 5.3],
         ]);
 
-        let y = arr1(&[0, 0, 0, 0, 1, 1, 1, 1]);
+        let y: Array1<usize> = arr1(&[0, 0, 2, 2, 1, 1, 1, 1]);
 
-        let mut model = StreamingDecisionTree::new(5, 500_000);
+        let mut model = StreamingDecisionTree::<Gini>::new(3, 500_000, 5);
 
         root.dataflow::<usize, _, _>(|scope| {
             let training_stream = vec![

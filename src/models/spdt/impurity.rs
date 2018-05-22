@@ -12,7 +12,7 @@ pub trait Impurity {
         L: Copy + PartialEq;
 }
 
-struct Gini;
+pub struct Gini;
 
 impl Impurity for Gini {
     fn impurity_delta<L>(
@@ -62,7 +62,7 @@ impl Impurity for Gini {
     }
 }
 
-/*struct Entropy;
+/*pub struct Entropy;
 
 impl Impurity for Entropy {
     fn impurity<L>(

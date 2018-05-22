@@ -71,11 +71,12 @@ impl Histogram {
 
     /// Estimates the number of points in the interval [-inf, b]
     pub fn sum(&self, b: f64) -> f64 {
+        debug!("Sum for {:?} b = {}", self, b);
         let i = (self.data
             .iter()
             .enumerate()
-            .find(|(_, bin)| bin.p > b)
-            .expect("Find upper bound of histogram sum")
+            .find(|(_, bin)| bin.p >= b)
+            .unwrap_or_else(|| { let i = self.data.len() - 1; (i, &self.data[i]) })
             .0)
             .max(1) - 1;
 
@@ -104,9 +105,14 @@ impl Histogram {
         (1..bins)
             .map(|j| {
                 let s = (j as f64 / bins as f64) * self.data.iter().map(|b| b.m).sum::<f64>();
-                let i = (0..self.data.len())
-                    .find(|i| self.sum(p(*i)) > s)
-                    .expect("Select init bin for uniform") - 1;
+                debug!("s = {}", s);
+                let i = (1..self.data.len())
+                    .find(|i| {
+                        let sum = self.sum(p(*i));
+                        debug!("Sum = {}, s = {}", sum, s);
+                        sum > s
+                    })
+                    .unwrap_or_else(|| self.data.len() - 1) - 1;
 
                 let z = {
                     let d = s - self.sum(p(i));

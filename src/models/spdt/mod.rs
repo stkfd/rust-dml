@@ -1,7 +1,7 @@
 #![allow(unknown_lints)]
 
 mod histogram;
-mod impurity;
+pub mod impurity;
 mod tree;
 
 use self::histogram::operators::*;
@@ -13,6 +13,7 @@ use data::serialization::*;
 use fnv::FnvHashMap;
 use models::StreamingSupModel;
 use ndarray::prelude::*;
+use std::fmt::Debug;
 use std::hash::Hash;
 use std::marker::PhantomData;
 use timely::dataflow::channels::pact::Pipeline;
@@ -20,8 +21,7 @@ use timely::dataflow::operators::*;
 use timely::dataflow::{Scope, Stream};
 use timely::progress::nested::product::Product;
 use timely::progress::Timestamp;
-use timely::Data;
-use timely::ExchangeData;
+use timely::{Data, ExchangeData};
 use Result;
 
 pub struct StreamingDecisionTree<I: Impurity> {
@@ -45,7 +45,7 @@ impl<I: Impurity> StreamingDecisionTree<I> {
 impl<L, I: Impurity> StreamingSupModel<TrainingData<f64, L>, AbomonableArray2<f64>, (), ()>
     for StreamingDecisionTree<I>
 where
-    L: ExchangeData + Into<usize> + Copy + Eq + Hash + 'static,
+    L: Debug + ExchangeData + Into<usize> + Copy + Eq + Hash + 'static,
 {
     /// Predict output from inputs.
     fn predict<S: Scope>(
@@ -80,10 +80,13 @@ where
                 init_tree
                     .to_stream(tree_iter_scope)
                     .concat(&cycle)
+                    .inspect(|x| println!("{:?}", x))
                     .broadcast()
                     .create_histograms(&training_data.enter(tree_iter_scope), self.bins)
                     .aggregate_histograms()
                     .map(move |(mut tree, histograms, n_attributes)| {
+                        debug!("Begin splitting phase");
+                        debug!("Attributes: {}", n_attributes);
                         for leaf in tree.unlabeled_leaves() {
                             let (split_attr, (_delta, split_location)) = (0..n_attributes)
                                 .map(|attr| {
@@ -116,6 +119,7 @@ where
                                                 .unwrap_or(::std::cmp::Ordering::Less)
                                         })
                                         .expect("Choose maximum split delta");
+                                    println!("Delta + Split: {:?}", best_delta_and_split);
                                     (attr, best_delta_and_split)
                                 })
                                 .max_by(|(_, (delta1, _)), (_, (delta2, _))| {
@@ -124,13 +128,12 @@ where
                                         .unwrap_or(::std::cmp::Ordering::Less)
                                 })
                                 .expect("Choose best split attribute");
-                            
+
                             tree.split(leaf, Rule::new(split_attr, split_location));
                         }
 
                         tree
                     })
-                    .inspect(move |_x| println!("{}", worker))
                     .connect_loop(loop_handle);
             });
         });
