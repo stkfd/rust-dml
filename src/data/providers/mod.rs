@@ -1,4 +1,4 @@
-use data::serialization::AbomonableArray2;
+use data::serialization::*;
 use num_traits::PrimInt;
 use std::convert::TryFrom;
 use timely::{Data, ExchangeData};
@@ -14,6 +14,10 @@ pub mod array;
 /// by passing it a `SliceIndex` which addresses it.
 pub trait IndexableData: Data {
     type SliceIndex: IndexesSlice + ExchangeData;
+}
+
+impl <T: Data> IndexableData for AbomonableArray1<T> {
+    type SliceIndex = IntSliceIndex<usize>;
 }
 
 impl <T: Data> IndexableData for AbomonableArray2<T> {

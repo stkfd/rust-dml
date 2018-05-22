@@ -1,20 +1,61 @@
 //! Decision Tree data structure. Uses an Arena-Type allocation system
 //! to manage the nodes in memory, similar to [Indextree](https://github.com/saschagrunert/indextree).
 
-use ndarray::prelude::*;
-use std::ops::Index;
-use std::ops::IndexMut;
-use std::cmp::Ordering;
+#![allow(dead_code)]
 
-#[derive(Debug)]
+use ndarray::prelude::*;
+use std::cmp::Ordering;
+use std::ops::{Index, IndexMut};
+
+#[derive(Abomonation, Debug, Clone, Eq, Hash, PartialEq)]
 pub struct DecisionTree<T, L> {
     nodes: Vec<Node<T, L>>,
     root: NodeIndex,
 }
 
+impl<T, L> Default for DecisionTree<T, L> {
+    fn default() -> Self {
+        let root = Node::Leaf { label: None };
+        DecisionTree {
+            nodes: vec![root],
+            root: NodeIndex(0),
+        }
+    }
+}
+
 impl<T, L> DecisionTree<T, L> {
+    pub fn root(&self) -> NodeIndex {
+        self.root
+    }
+
+    pub fn split(&mut self, node: NodeIndex, rule: Rule<T>) -> (NodeIndex, NodeIndex) {
+        let l = self.new_leaf(None);
+        let r = self.new_leaf(None);
+        self[node] = Node::Inner { rule, l, r };
+        (l, r)
+    }
+
+    pub fn label(&mut self, node: NodeIndex, new_label: L) {
+        match self[node] {
+            Node::Leaf { ref mut label } => *label = Some(new_label),
+            _ => panic!("Tried to label a non-leaf node"),
+        }
+    }
+
     pub fn nodes(&self) -> &[Node<T, L>] {
         self.nodes.as_slice()
+    }
+
+    pub fn unlabeled_leaves(&self) -> Vec<NodeIndex> {
+        self.nodes
+            .iter()
+            .enumerate()
+            .filter(|(_i, node)| match node {
+                Node::Leaf { label: None } => true,
+                _ => false,
+            })
+            .map(|(i, _)| NodeIndex(i))
+            .collect()
     }
 
     fn new_node(&mut self, node: Node<T, L>) -> NodeIndex {
@@ -23,33 +64,8 @@ impl<T, L> DecisionTree<T, L> {
         index
     }
 
-    fn new_leaf(&mut self, label: L) -> NodeIndex {
+    fn new_leaf(&mut self, label: Option<L>) -> NodeIndex {
         self.new_node(Node::Leaf { label })
-    }
-
-    pub fn new(root_label: L) -> Self {
-        let root = Node::Leaf { label: root_label };
-        DecisionTree {
-            nodes: vec![root],
-            root: NodeIndex(0),
-        }
-    }
-
-    pub fn root(&self) -> NodeIndex {
-        self.root
-    }
-
-    pub fn split(
-        &mut self,
-        node: NodeIndex,
-        rule: Rule<T>,
-        label_l: L,
-        label_r: L,
-    ) -> (NodeIndex, NodeIndex) {
-        let l = self.new_leaf(label_l);
-        let r = self.new_leaf(label_r);
-        self[node] = Node::Inner { rule, l, r };
-        (l, r)
     }
 }
 
@@ -57,12 +73,15 @@ impl<T: PartialOrd, L: Clone> DecisionTree<T, L> {
     pub fn descend<'a, 'b: 'a>(&'b self, value: ArrayView1<'a, T>) -> Option<L> {
         let last_node_id = self.descend_iter(value).last()?;
         match &self[last_node_id] {
-            Node::Leaf { label } => Some(label.clone()),
+            Node::Leaf { label } => label.clone(),
             Node::Inner { .. } => panic!("Tree ended on a non-leaf node"),
         }
     }
 
-    pub fn descend_iter<'a, 'b: 'a>(&'b self, value: ArrayView1<'a, T>) -> DescendIterator<'a, T, L> {
+    pub fn descend_iter<'a, 'b: 'a>(
+        &'b self,
+        value: ArrayView1<'a, T>,
+    ) -> DescendIterator<'a, T, L> {
         DescendIterator {
             value,
             tree: self,
@@ -105,10 +124,16 @@ impl<T, L> IndexMut<NodeIndex> for DecisionTree<T, L> {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Hash, Abomonation, Debug, Copy, Clone, PartialEq, Eq)]
 pub struct NodeIndex(usize);
 
-#[derive(Debug)]
+impl NodeIndex {
+    pub fn inner(&self) -> usize {
+        self.0
+    }
+}
+
+#[derive(Abomonation, Debug, Clone, Eq, PartialEq, Hash)]
 pub enum Node<T, L> {
     Inner {
         rule: Rule<T>,
@@ -116,14 +141,20 @@ pub enum Node<T, L> {
         r: NodeIndex,
     },
     Leaf {
-        label: L,
+        label: Option<L>,
     },
 }
 
-#[derive(Debug)]
+#[derive(Abomonation, Debug, Clone, Eq, PartialEq, Hash)]
 pub struct Rule<T> {
     feature: usize,
     threshold: T,
+}
+
+impl<T> Rule<T> {
+    pub fn new(feature: usize, threshold: T) -> Self {
+        Rule { feature, threshold }
+    }
 }
 
 impl<T: PartialOrd, L> Node<T, L> {
@@ -133,7 +164,7 @@ impl<T: PartialOrd, L> Node<T, L> {
                 match value[rule.feature].partial_cmp(&rule.threshold) {
                     Some(Ordering::Less) => Some(l),
                     Some(Ordering::Greater) | Some(Ordering::Equal) => Some(r),
-                    None => None
+                    None => None,
                 }
             }
             Node::Leaf { .. } => None,
@@ -147,20 +178,48 @@ mod test {
 
     #[test]
     fn descend_tree() {
-        let v_red = arr1(&[2, 0, 0]);
-        let v_yellow = arr1(&[2, 2, 0]);
-        let v_blue = arr1(&[0, 0, 2]);
+        let v_red = arr1(&[1, 0, 0]);
+        let v_yellow = arr1(&[1, 1, 0]);
+        let v_blue = arr1(&[0, 0, 1]);
 
-        let mut tree = DecisionTree::new("?");
+        let mut tree = DecisionTree::default();
         let root = tree.root();
-        let (not_red, red) = tree.split(root, Rule { feature: 0, threshold: 1 }, "No Red", "Red");
-        let (red_and_not_green, red_green) = tree.split(red, Rule { feature: 1, threshold: 1 }, "Red and not green", "Red mixed");
-        let (pure_red, _) = tree.split(red_and_not_green, Rule { feature: 2, threshold: 1 }, "Pure Red", "Red mixed");
+        let (not_red, red) = tree.split(
+            root,
+            Rule {
+                feature: 0,
+                threshold: 1,
+            },
+        );
+        let (red_and_not_green, red_green) = tree.split(
+            red,
+            Rule {
+                feature: 1,
+                threshold: 1,
+            },
+        );
+        let (pure_red, _) = tree.split(
+            red_and_not_green,
+            Rule {
+                feature: 2,
+                threshold: 1,
+            },
+        );
+        tree.label(pure_red, "Pure Red");
 
-        assert_eq!(vec![root, red, red_and_not_green, pure_red], tree.descend_iter(v_red.view()).collect::<Vec<_>>());
-        assert_eq!(vec![root, red, red_green], tree.descend_iter(v_yellow.view()).collect::<Vec<_>>());
-        assert_eq!(vec![root, not_red], tree.descend_iter(v_blue.view()).collect::<Vec<_>>());
-        
+        assert_eq!(
+            vec![root, red, red_and_not_green, pure_red],
+            tree.descend_iter(v_red.view()).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            vec![root, red, red_green],
+            tree.descend_iter(v_yellow.view()).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            vec![root, not_red],
+            tree.descend_iter(v_blue.view()).collect::<Vec<_>>()
+        );
+
         assert_eq!("Pure Red", tree.descend(v_red.view()).unwrap());
     }
 }

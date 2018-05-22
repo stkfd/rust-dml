@@ -154,7 +154,7 @@ where
 
         let mut provider = input_spec.to_provider()?;
         let initial_centroids: Vec<AbomonableArray2<Item>> =
-            vec![Init::select_initial_centroids(&mut provider, n_clusters, cols)?.into()];
+            vec![Init::select_initial_centroids(&mut provider, n_clusters, cols)?];
 
         debug!(
             "Selected initial centroids: {}",
@@ -179,7 +179,7 @@ where
                     let mut provider = input_spec.clone().to_provider().unwrap();
                     (
                         slice_index,
-                        AbomonableArray::from(provider.slice(slice_index).unwrap()),
+                        provider.slice(slice_index).unwrap(),
                     )
                 });
 
@@ -270,7 +270,7 @@ where
                 });
 
                 let frontiers = [in_centroids.frontier(), in_points.frontier()];
-                for (cap, centroid_list) in centroid_stash.iter_mut() {
+                for (cap, centroid_list) in &mut centroid_stash {
                     // if neither input can produce data at `time`, compute statistics
                     if frontiers.iter().all(|f| !f.less_equal(cap.time())) {
                         debug!("Worker {} processing centroid/point data", worker_index);

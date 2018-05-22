@@ -20,6 +20,7 @@ itertools="0.7"
 num-traits = "0.2"
 rand="0.4"
 float-cmp="0.4.0"
+fnv = "1.0.5"
 
 [dev-dependencies]
 flexi_logger = "0.8"

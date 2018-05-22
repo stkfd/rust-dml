@@ -21,6 +21,7 @@ extern crate ndarray_linalg;
 extern crate num_traits;
 extern crate rand;
 extern crate float_cmp;
+extern crate fnv;
 
 use std::result::Result as StdResult;
 

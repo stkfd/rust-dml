@@ -113,7 +113,7 @@ where
     }
 }
 
-impl<'a, T> AddAssign<&'a AggregationStatistics<T>> for &'a mut AggregationStatistics<T>
+impl<'a, 'b, T> AddAssign<&'b AggregationStatistics<T>> for &'a mut AggregationStatistics<T>
 where
     T: Scalar + AddAssign<T>,
 {

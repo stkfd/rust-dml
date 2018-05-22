@@ -1,14 +1,17 @@
 #![allow(dead_code)]
+pub mod operators;
+
 use float_cmp::{ApproxEq, Ulps};
 use std::cmp::Ordering;
 
-#[derive(Debug, Clone)]
+#[derive(Abomonation, Debug, Clone)]
 pub struct Histogram {
     bins: usize,
     data: Vec<Bin>,
 }
 
 impl Histogram {
+    /// Initialize a new histogram maximum `bins` number of bins
     pub fn new(bins: usize) -> Histogram {
         Histogram {
             bins,
@@ -16,7 +19,9 @@ impl Histogram {
         }
     }
 
-    /// Inserts or updates a bin with new
+    /// Inserts a new data point into a bin, either creating a new bin to contain it
+    /// or if the histogram already contains the maximum number of bins, merging it
+    /// into an existing bin
     pub fn update(&mut self, p: f64) {
         let bins = &mut self.data;
 
@@ -35,14 +40,15 @@ impl Histogram {
                         .unwrap()
                         .0;
 
-                    let next_bin = &bins[least_diff + 1].clone();
-                    bins[least_diff].merge(next_bin);
+                    let next_bin = bins[least_diff + 1];
+                    bins[least_diff].merge(&next_bin);
                     bins.remove(least_diff + 1);
                 }
             }
         }
     }
 
+    /// Merges the contents of another histogram into this histogram
     pub fn merge(&mut self, other: &Histogram) {
         let bins = &mut self.data;
         let other_bins = &other.data;
@@ -57,12 +63,13 @@ impl Histogram {
                 .unwrap()
                 .0;
 
-            let next_bin = &bins[least_diff + 1].clone();
-            bins[least_diff].merge(next_bin);
+            let next_bin = bins[least_diff + 1];
+            bins[least_diff].merge(&next_bin);
             bins.remove(least_diff + 1);
         }
     }
 
+    /// Estimates the number of points in the interval [-inf, b]
     pub fn sum(&self, b: f64) -> f64 {
         let i = (self.data
             .iter()
@@ -84,6 +91,12 @@ impl Histogram {
         sum + bin_i.m / 2.
     }
 
+    /// Estimates the number of points in the whole histogram
+    pub fn sum_total(&self) -> f64 {
+        self.data.iter().fold(0., |acc, bin| acc + bin.m)
+    }
+
+    #[allow(many_single_char_names)]
     pub fn uniform(&self, bins: usize) -> Vec<f64> {
         let m = |i: usize| self.data[i].m;
         let p = |i: usize| self.data[i].p;
@@ -107,11 +120,15 @@ impl Histogram {
             .collect()
     }
 
+    /// Returns a slice of the individual bins in this histogram
     pub fn bins(&self) -> &[Bin] {
         self.data.as_slice()
     }
 }
 
+/// Initialize a Histogram from a `Vec<Bin>`, setting
+/// the maximum number of bins to the number of bins in
+/// the `Vec`
 impl From<Vec<Bin>> for Histogram {
     fn from(bins: Vec<Bin>) -> Histogram {
         Histogram {
@@ -121,7 +138,7 @@ impl From<Vec<Bin>> for Histogram {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Abomonation, Clone, Copy, Debug)]
 pub struct Bin {
     /// center value of the bin
     p: f64,
@@ -134,6 +151,8 @@ impl Bin {
         Bin { p, m }
     }
 
+    /// Merges this bin with another one, summing the number of points
+    /// and shifting the center of the bin to accomodate
     pub fn merge(&mut self, other: &Bin) {
         let m_sum = self.m + other.m;
         self.p = (self.p * self.m + other.p * other.m) / m_sum;
@@ -141,12 +160,15 @@ impl Bin {
     }
 }
 
+/// Sorts a bin by its center value (not by the number of points contained!)
 impl PartialOrd for Bin {
     fn partial_cmp(&self, other: &Bin) -> Option<Ordering> {
         self.p.partial_cmp(&other.p)
     }
 }
 
+/// Compares the center and number of points in this bin with another.
+/// Will fail in debug builds if any of the values are NaN or infinite
 impl PartialEq for Bin {
     fn eq(&self, other: &Bin) -> bool {
         debug_assert!(self.p.is_finite());

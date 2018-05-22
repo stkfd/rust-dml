@@ -1,7 +1,11 @@
 //! Extension traits and other tools to deal with dataflow Streams.
 
-use timely::dataflow::operators::capture::Event;
 use std::sync::mpsc;
+use timely::dataflow::channels::pact::Pipeline;
+use timely::dataflow::operators::capture::Event;
+use timely::dataflow::operators::*;
+use timely::dataflow::{Scope, Stream};
+use timely::ExchangeData;
 use Result;
 
 /// A container for result data coming in asynchronously from somewhere. Internally uses the `std::sync::mpsc`
@@ -25,11 +29,11 @@ impl<T> AsyncResult<T> {
                 AsyncResult::Data(data)
             }
             AsyncResult::Data(_) => return Ok(()),
-            AsyncResult::Uninitialized => 
+            AsyncResult::Uninitialized => {
                 return Err(format_err!(
                     "Attempted to retrieve training results, but the model was not trained"
                 ))
-            
+            }
         };
         Ok(())
     }
@@ -44,7 +48,7 @@ impl<T> AsyncResult<T> {
     pub fn get_unchecked(&self) -> &T {
         match *self {
             AsyncResult::Data(ref data) => data,
-            _ => panic!("Result did not contain data when get_unchecked was called")
+            _ => panic!("Result did not contain data when get_unchecked was called"),
         }
     }
 
@@ -58,7 +62,7 @@ impl<T> AsyncResult<T> {
     pub fn take_unchecked(self) -> T {
         match self {
             AsyncResult::Data(data) => data,
-            _ => panic!("Result did not contain data when take_unchecked was called")
+            _ => panic!("Result did not contain data when take_unchecked was called"),
         }
     }
 }
@@ -69,13 +73,13 @@ impl<T> AsyncResult<T> {
 /// from Timely Dataflow.
 pub trait ExtractUnordered<T: Ord, D> {
     /// Converts `self` into a sequence of timestamped data.
-    /// 
+    ///
     /// Currently this is only implemented for `Receiver<Event<T, D>>`, and is used only
     /// to easily pull data out of a timely dataflow computation once it has completed.
     fn extract_unordered(&self) -> Vec<(T, Vec<D>)>;
 }
 
-impl<T: Ord, D> ExtractUnordered<T,D> for ::std::sync::mpsc::Receiver<Event<T, D>> {
+impl<T: Ord, D> ExtractUnordered<T, D> for ::std::sync::mpsc::Receiver<Event<T, D>> {
     fn extract_unordered(&self) -> Vec<(T, Vec<D>)> {
         let mut result = Vec::new();
         for event in self {
@@ -83,20 +87,41 @@ impl<T: Ord, D> ExtractUnordered<T,D> for ::std::sync::mpsc::Receiver<Event<T, D
                 result.push((time, data));
             }
         }
-        result.sort_by(|x,y| x.0.cmp(&y.0));
+        result.sort_by(|x, y| x.0.cmp(&y.0));
 
         let mut current = 0;
-        for i in 1 .. result.len() {
+        for i in 1..result.len() {
             if result[current].0 == result[i].0 {
                 let dataz = ::std::mem::replace(&mut result[i].1, Vec::new());
                 result[current].1.extend(dataz);
-            }
-            else {
+            } else {
                 current = i;
             }
         }
 
         result.retain(|x| !x.1.is_empty());
         result
+    }
+}
+
+pub trait ExchangeEvenly<S: Scope, D: ExchangeData> {
+    fn exchange_evenly(&self) -> Stream<S, D>;
+}
+
+impl<S: Scope, D: ExchangeData> ExchangeEvenly<S, D> for Stream<S, D> {
+    fn exchange_evenly(&self) -> Stream<S, D> {
+        let peers = self.scope().peers() as u64;
+        self.unary(Pipeline, "ExchangeEvenly", |_| {
+            let mut count = 0_u64;
+            move |input, output| {
+                input.for_each(|time, data| {
+                    output.session(&time).give_iterator(data.drain(..).map(|x| {
+                        count += 1;
+                        (x, count % peers)
+                    }));
+                });
+            }
+        }).exchange(|(_x, n)| *n)
+            .map(|(x, _)| x)
     }
 }
