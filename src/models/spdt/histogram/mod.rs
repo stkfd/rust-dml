@@ -67,16 +67,42 @@ impl Histogram {
             bins[least_diff].merge(&next_bin);
             bins.remove(least_diff + 1);
         }
+
+        bins.sort_unstable();
+        let mut i = 0;
+        while i + 1 < bins.len() {
+            if bins[i].p.approx_eq(&bins[i + 1].p, ::std::f64::EPSILON, 2) {
+                let next_bin = bins[i + 1];
+                bins[i].merge(&next_bin);
+                bins.remove(i + 1);
+            }
+            i += 1;
+        }
     }
 
     /// Estimates the number of points in the interval [-inf, b]
     pub fn sum(&self, b: f64) -> f64 {
-        debug!("Sum for {:?} b = {}", self, b);
+        if self.data.is_empty() {
+            return 0.;
+        }
+
+        if self.data[0].p > b {
+            return 0.
+        }
+
+        // special case for only one bin; return 0 if b < p of that bin, m of the bin otherwise
+        if self.data.len() == 1 {
+            return self.data[0].p
+        }
+
         let i = (self.data
             .iter()
             .enumerate()
             .find(|(_, bin)| bin.p >= b)
-            .unwrap_or_else(|| { let i = self.data.len() - 1; (i, &self.data[i]) })
+            .unwrap_or_else(|| {
+                let i = self.data.len() - 1;
+                (i, &self.data[i])
+            })
             .0)
             .max(1) - 1;
 
@@ -89,6 +115,9 @@ impl Histogram {
         for j in 0..i {
             sum += self.data[j].m;
         }
+
+        debug_assert!(sum.is_finite());
+
         sum + bin_i.m / 2.
     }
 
@@ -105,13 +134,8 @@ impl Histogram {
         (1..bins)
             .map(|j| {
                 let s = (j as f64 / bins as f64) * self.data.iter().map(|b| b.m).sum::<f64>();
-                debug!("s = {}", s);
                 let i = (1..self.data.len())
-                    .find(|i| {
-                        let sum = self.sum(p(*i));
-                        debug!("Sum = {}, s = {}", sum, s);
-                        sum > s
-                    })
+                    .find(|i| self.sum(p(*i)) > s)
                     .unwrap_or_else(|| self.data.len() - 1) - 1;
 
                 let z = {

@@ -9,7 +9,7 @@ pub trait Impurity {
         split_at: f64,
     ) -> Option<f64>
     where
-        L: Copy + PartialEq;
+        L: Copy + PartialEq + ::std::fmt::Debug;
 }
 
 pub struct Gini;
@@ -22,7 +22,7 @@ impl Impurity for Gini {
         split_at: f64,
     ) -> Option<f64>
     where
-        L: Copy + PartialEq,
+        L: Copy + PartialEq + ::std::fmt::Debug,
     {
         if let Some(histograms) = histograms.get_by_node_attribute(node_index, attribute) {
             // sum all samples reaching this node/attribute combination
@@ -41,6 +41,7 @@ impl Impurity for Gini {
             let total_left_split = histogram_sum_left_split
                 .iter()
                 .fold(0., |total, sum| total + sum);
+
             // likelihood of a sample going to the left split
             let p_left = histogram_sum_left_split
                 .iter()
@@ -54,7 +55,11 @@ impl Impurity for Gini {
                 .iter()
                 .map(|s| 1. - s / total_left_split)
                 .fold(0., |acc, p| acc + p * p);
-            
+
+            debug!(
+                "node_impurity = {}, p_left = {}, impurity_left = {}, impurity_right = {}",
+                node_impurity, p_left, impurity_left, impurity_right
+            );
             Some(node_impurity - p_left * impurity_left - (1. - p_left) * impurity_right)
         } else {
             None

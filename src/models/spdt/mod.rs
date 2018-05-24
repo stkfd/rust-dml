@@ -75,12 +75,11 @@ where
                     vec![]
                 };
 
-                let worker = tree_iter_scope.index();
-                let (loop_handle, cycle) = tree_iter_scope.loop_variable(self.levels, 1);
+                let (loop_handle, cycle) = tree_iter_scope.loop_variable(self.levels + 1, 1);
                 init_tree
                     .to_stream(tree_iter_scope)
                     .concat(&cycle)
-                    .inspect(|x| println!("{:?}", x))
+                    .inspect(|x| info!("Begin tree iteration: {:?}", x))
                     .broadcast()
                     .create_histograms(&training_data.enter(tree_iter_scope), self.bins)
                     .aggregate_histograms()
@@ -111,6 +110,8 @@ where
                                                     attr,
                                                     *candidate_split,
                                                 ).unwrap();
+                                            debug!("Calculating candidate split for attr {} at {}", attr, candidate_split);
+                                            debug!("Calculated delta = {}", delta);
                                             (delta, *candidate_split)
                                         })
                                         .max_by(|a, b| {
@@ -119,7 +120,7 @@ where
                                                 .unwrap_or(::std::cmp::Ordering::Less)
                                         })
                                         .expect("Choose maximum split delta");
-                                    println!("Delta + Split: {:?}", best_delta_and_split);
+                                    debug!("Best split for attribute {}: {} with delta {}", attr, best_delta_and_split.1, best_delta_and_split.0);
                                     (attr, best_delta_and_split)
                                 })
                                 .max_by(|(_, (delta1, _)), (_, (delta2, _))| {
@@ -128,6 +129,8 @@ where
                                         .unwrap_or(::std::cmp::Ordering::Less)
                                 })
                                 .expect("Choose best split attribute");
+                            
+                            debug!("Splitting tree node {:?} with attribute {} < {}: delta {}", leaf, split_attr, split_location, _delta);
 
                             tree.split(leaf, Rule::new(split_attr, split_location));
                         }

@@ -138,6 +138,7 @@ impl<
         training_data: &Stream<S, TrainingData<T, L>>,
         bins: usize,
     ) -> Stream<S, TreeWithHistograms<T, L>> {
+        let worker = self.scope().index();
         self.binary_frontier(
             training_data,
             Pipeline,
@@ -165,8 +166,10 @@ impl<
 
                     let frontiers = [in_data.frontier(), in_tree.frontier()];
                     for (time, data) in &mut data_stash {
+                        debug!("check time {:?}", time.time());
                         // received the decision tree for this time
                         if frontiers.iter().all(|f| !f.less_equal(time)) {
+                            debug!("Worker {} collecting histograms", worker);
                             let tree = tree_stash.remove(time).expect("Retrieve decision tree");
                             let mut histograms = HistogramCollection::<L>::default();
 

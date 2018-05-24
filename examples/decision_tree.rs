@@ -31,7 +31,7 @@ fn main() {
 
         let y: Array1<usize> = arr1(&[0, 0, 2, 2, 1, 1, 1, 1]);
 
-        let mut model = StreamingDecisionTree::<Gini>::new(3, 500_000, 5);
+        let mut model = StreamingDecisionTree::<Gini>::new(10, 500_000, 10);
 
         root.dataflow::<usize, _, _>(|scope| {
             let training_stream = vec![
