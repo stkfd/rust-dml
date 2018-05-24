@@ -5,16 +5,16 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Launch",
             "type": "lldb",
-            "request": "attach",
-            "name": "Attach",
+            "request": "launch",
             "program": "${workspaceFolder}/target/debug/examples/kmeans"
         },
         {
             "name": "Launch",
             "type": "lldb",
             "request": "launch",
-            "program": "${workspaceFolder}/target/debug/examples/kmeans"
+            "program": "${workspaceFolder}/target/debug/examples/decision_tree"
         }
     ]
 }
