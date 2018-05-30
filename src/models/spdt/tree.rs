@@ -28,10 +28,10 @@ impl<T, L> DecisionTree<T, L> {
         self.root
     }
 
-    pub fn split(&mut self, node: NodeIndex, rule: Rule<T>) -> (NodeIndex, NodeIndex) {
+    pub fn split(&mut self, node: NodeIndex, rule: Rule<T>, label: Option<L>) -> (NodeIndex, NodeIndex) {
         let l = self.new_leaf(None);
         let r = self.new_leaf(None);
-        self[node] = Node::Inner { rule, l, r };
+        self[node] = Node::Inner { rule, l, r, label };
         (l, r)
     }
 
@@ -139,6 +139,7 @@ pub enum Node<T, L> {
         rule: Rule<T>,
         l: NodeIndex,
         r: NodeIndex,
+        label: Option<L>,
     },
     Leaf {
         label: Option<L>,
@@ -160,7 +161,7 @@ impl<T> Rule<T> {
 impl<T: PartialOrd, L> Node<T, L> {
     pub fn descend(&self, value: &ArrayView1<T>) -> Option<NodeIndex> {
         match *self {
-            Node::Inner { ref rule, l, r } => {
+            Node::Inner { ref rule, l, r, .. } => {
                 match value[rule.feature].partial_cmp(&rule.threshold) {
                     Some(Ordering::Less) => Some(l),
                     Some(Ordering::Greater) | Some(Ordering::Equal) => Some(r),

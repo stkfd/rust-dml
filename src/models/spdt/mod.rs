@@ -3,16 +3,17 @@
 mod histogram;
 pub mod impurity;
 mod tree;
+mod split_leaves;
 
+use models::TrainingData;
 use self::histogram::operators::*;
-use self::histogram::Histogram;
 use self::impurity::*;
 use self::tree::*;
+use self::split_leaves::*;
 use data::dataflow::ExchangeEvenly;
 use data::serialization::*;
 use fnv::FnvHashMap;
 use models::StreamingSupModel;
-use ndarray::prelude::*;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::marker::PhantomData;
@@ -24,6 +25,7 @@ use timely::progress::Timestamp;
 use timely::{Data, ExchangeData};
 use Result;
 
+/// Supervised models that builds a decision tree from streaming data
 pub struct StreamingDecisionTree<I: Impurity> {
     levels: u64,
     points_per_worker: u64,
@@ -32,6 +34,7 @@ pub struct StreamingDecisionTree<I: Impurity> {
 }
 
 impl<I: Impurity> StreamingDecisionTree<I> {
+    /// Creates a new model instance
     pub fn new(levels: u64, points_per_worker: u64, bins: usize) -> Self {
         StreamingDecisionTree {
             levels,
@@ -68,7 +71,6 @@ where
                 .exchange_evenly();
 
             data_segments_scope.scoped::<u64, _, _>(|tree_iter_scope| {
-                let bins = self.bins;
                 let init_tree = if tree_iter_scope.index() == 0 {
                     vec![DecisionTree::<f64, L>::default()]
                 } else {
@@ -81,87 +83,21 @@ where
                     .concat(&cycle)
                     .inspect(|x| info!("Begin tree iteration: {:?}", x))
                     .broadcast()
-                    .create_histograms(&training_data.enter(tree_iter_scope), self.bins)
+                    .create_histograms(
+                        &training_data.enter(tree_iter_scope),
+                        self.bins,
+                        self.points_per_worker as usize,
+                    )
                     .aggregate_histograms()
-                    .map(move |(mut tree, histograms, n_attributes)| {
-                        debug!("Begin splitting phase");
-                        debug!("Attributes: {}", n_attributes);
-                        for leaf in tree.unlabeled_leaves() {
-                            let (split_attr, (_delta, split_location)) = (0..n_attributes)
-                                .map(|attr| {
-                                    let merged_histograms = histograms
-                                        .get_by_node_attribute(leaf, attr)
-                                        .expect("Getting histogram by node and attribute")
-                                        .iter()
-                                        .fold(Histogram::new(bins), move |mut acc, h| {
-                                            acc.merge(&h.1);
-                                            acc
-                                        });
-
-                                    // calculate impurity delta for each candidate split and return the highest
-                                    let best_delta_and_split = merged_histograms
-                                        .uniform(bins)
-                                        .iter()
-                                        .map(|candidate_split| {
-                                            let delta =
-                                                I::impurity_delta(
-                                                    &histograms,
-                                                    leaf,
-                                                    attr,
-                                                    *candidate_split,
-                                                ).unwrap();
-                                            debug!("Calculating candidate split for attr {} at {}", attr, candidate_split);
-                                            debug!("Calculated delta = {}", delta);
-                                            (delta, *candidate_split)
-                                        })
-                                        .max_by(|a, b| {
-                                            a.0
-                                                .partial_cmp(&b.0)
-                                                .unwrap_or(::std::cmp::Ordering::Less)
-                                        })
-                                        .expect("Choose maximum split delta");
-                                    debug!("Best split for attribute {}: {} with delta {}", attr, best_delta_and_split.1, best_delta_and_split.0);
-                                    (attr, best_delta_and_split)
-                                })
-                                .max_by(|(_, (delta1, _)), (_, (delta2, _))| {
-                                    delta1
-                                        .partial_cmp(&delta2)
-                                        .unwrap_or(::std::cmp::Ordering::Less)
-                                })
-                                .expect("Choose best split attribute");
-                            
-                            debug!("Splitting tree node {:?} with attribute {} < {}: delta {}", leaf, split_attr, split_location, _delta);
-
-                            tree.split(leaf, Rule::new(split_attr, split_location));
-                        }
-
+                    .split_leaves::<I>(self.levels, self.bins as u64)
+                    .map(|(split_leaves, tree)| {
+                        info!("Split {} leaves", split_leaves);
                         tree
                     })
                     .connect_loop(loop_handle);
             });
         });
         Ok(vec![()].to_stream(scope))
-    }
-}
-
-#[derive(Clone, Abomonation, Debug)]
-pub struct TrainingData<T, L> {
-    pub x: AbomonableArray2<T>,
-    pub y: AbomonableArray1<L>,
-}
-
-impl<T, L> TrainingData<T, L> {
-    pub fn x<'a, 'b: 'a>(&'b self) -> ArrayView2<'a, T> {
-        self.x.view()
-    }
-    pub fn x_mut<'a, 'b: 'a>(&'b mut self) -> ArrayViewMut2<'a, T> {
-        self.x.view_mut()
-    }
-    pub fn y<'a, 'b: 'a>(&'b self) -> ArrayView1<'a, L> {
-        self.y.view()
-    }
-    pub fn y_mut<'a, 'b: 'a>(&'b mut self) -> ArrayViewMut1<'a, L> {
-        self.y.view_mut()
     }
 }
 

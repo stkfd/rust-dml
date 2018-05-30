@@ -3,8 +3,10 @@
 use std::sync::mpsc;
 use timely::dataflow::channels::pact::Pipeline;
 use timely::dataflow::operators::capture::Event;
+use timely::dataflow::operators::generic::builder_rc::OperatorBuilder;
 use timely::dataflow::operators::*;
 use timely::dataflow::{Scope, Stream};
+use timely::Data;
 use timely::ExchangeData;
 use Result;
 
@@ -123,5 +125,46 @@ impl<S: Scope, D: ExchangeData> ExchangeEvenly<S, D> for Stream<S, D> {
             }
         }).exchange(|(_x, n)| *n)
             .map(|(x, _)| x)
+    }
+}
+
+pub trait Branch<S: Scope, D: Data> {
+    fn branch(
+        &self,
+        condition: impl Fn(&S::Timestamp, &D) -> bool + 'static,
+    ) -> (Stream<S, D>, Stream<S, D>);
+}
+
+impl<S: Scope, D: Data> Branch<S, D> for Stream<S, D> {
+    fn branch(
+        &self,
+        condition: impl Fn(&S::Timestamp, &D) -> bool + 'static,
+    ) -> (Stream<S, D>, Stream<S, D>) {
+        let mut builder = OperatorBuilder::new("Branch".to_owned(), self.scope());
+
+        let mut input = builder.new_input(self, Pipeline);
+        let (mut output1, stream1) = builder.new_output();
+        let (mut output2, stream2) = builder.new_output();
+
+        builder.build(move |_| {
+            move |_frontiers| {
+                let mut output1_handle = output1.activate();
+                let mut output2_handle = output2.activate();
+
+                input.for_each(|time, data| {
+                    let mut out1 = output1_handle.session(&time);
+                    let mut out2 = output2_handle.session(&time);
+                    for datum in data.drain(..) {
+                        if condition(&time.time(), &datum) {
+                            out2.give(datum);
+                        } else {
+                            out1.give(datum);
+                        }
+                    }
+                });
+            }
+        });
+
+        (stream1, stream2)
     }
 }

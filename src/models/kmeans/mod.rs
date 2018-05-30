@@ -19,10 +19,9 @@ use std::ops::{AddAssign, DivAssign, Sub};
 use std::sync::mpsc;
 use timely::dataflow::channels::pact::Pipeline;
 use timely::progress::Timestamp;
-use timely::{dataflow::{operators::*, Scope, Stream},
-             progress::nested::product::Product,
-             Data,
-             ExchangeData};
+use timely::{
+    dataflow::{operators::*, Scope, Stream}, progress::nested::product::Product, Data, ExchangeData,
+};
 use Result;
 
 pub use self::initializers::KMeansInitializer;
@@ -78,7 +77,9 @@ where
         scope: &mut S,
         inputs: Sp,
     ) -> Result<Stream<S, AbomonableArray2<usize>>> {
-        if scope.index() != 0 { return Ok(vec!().to_stream(scope)); }
+        if scope.index() != 0 {
+            return Ok(vec![].to_stream(scope));
+        }
         let centroids = self.centroids.get()?.view();
 
         let mut provider = inputs.to_provider()?;
@@ -153,8 +154,11 @@ where
             .unwrap_or(<usize>::max_value());
 
         let mut provider = input_spec.to_provider()?;
-        let initial_centroids: Vec<AbomonableArray2<Item>> =
-            vec![Init::select_initial_centroids(&mut provider, n_clusters, cols)?];
+        let initial_centroids: Vec<AbomonableArray2<Item>> = vec![Init::select_initial_centroids(
+            &mut provider,
+            n_clusters,
+            cols,
+        )?];
 
         debug!(
             "Selected initial centroids: {}",
@@ -162,7 +166,9 @@ where
         );
 
         let (result_sender, result_receiver) = mpsc::channel();
-        if scope.index() == 0 { self.centroids = AsyncResult::Receiver(result_receiver); }
+        if scope.index() == 0 {
+            self.centroids = AsyncResult::Receiver(result_receiver);
+        }
 
         let results = scope.scoped(|inner| {
             let worker_index = inner.index();
@@ -177,10 +183,7 @@ where
                 .map(move |(_, slice_index)| {
                     debug!("{:?}", slice_index);
                     let mut provider = input_spec.clone().to_provider().unwrap();
-                    (
-                        slice_index,
-                        provider.slice(slice_index).unwrap(),
-                    )
+                    (slice_index, provider.slice(slice_index).unwrap())
                 });
 
             let (loop_handle, loop_stream) = inner.loop_variable(max_iterations, 1);

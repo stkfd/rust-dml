@@ -87,12 +87,12 @@ impl Histogram {
         }
 
         if self.data[0].p > b {
-            return 0.
+            return 0.;
         }
 
         // special case for only one bin; return 0 if b < p of that bin, m of the bin otherwise
         if self.data.len() == 1 {
-            return self.data[0].p
+            return self.data[0].p;
         }
 
         let i = (self.data
@@ -127,13 +127,18 @@ impl Histogram {
     }
 
     #[allow(many_single_char_names)]
-    pub fn uniform(&self, bins: usize) -> Vec<f64> {
+    pub fn uniform(&self, bins: usize) -> Option<Vec<f64>> {
+        if self.data.len() <= 1 {
+            return None;
+        }
+
         let m = |i: usize| self.data[i].m;
         let p = |i: usize| self.data[i].p;
 
-        (1..bins)
+        let uniform = (1..bins)
             .map(|j| {
                 let s = (j as f64 / bins as f64) * self.data.iter().map(|b| b.m).sum::<f64>();
+                debug_assert!(self.data.len() > 1);
                 let i = (1..self.data.len())
                     .find(|i| self.sum(p(*i)) > s)
                     .unwrap_or_else(|| self.data.len() - 1) - 1;
@@ -147,7 +152,18 @@ impl Histogram {
                 };
                 p(i) + (p(i + 1) - p(i)) * z
             })
-            .collect()
+            .collect();
+        Some(uniform)
+    }
+
+    pub fn candidate_splits(&self) -> Vec<f64> {
+        if self.data.len() > 1 {
+            self.uniform(self.bins).unwrap()
+        } else if self.data.len() == 1 {
+            vec![self.data[0].p]
+        } else {
+            vec![]
+        }
     }
 
     /// Returns a slice of the individual bins in this histogram

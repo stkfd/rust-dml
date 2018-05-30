@@ -56,7 +56,7 @@ impl Impurity for Gini {
                 .map(|s| 1. - s / total_left_split)
                 .fold(0., |acc, p| acc + p * p);
 
-            debug!(
+            trace!(
                 "node_impurity = {}, p_left = {}, impurity_left = {}, impurity_right = {}",
                 node_impurity, p_left, impurity_left, impurity_right
             );
