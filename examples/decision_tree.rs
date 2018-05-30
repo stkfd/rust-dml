@@ -5,6 +5,7 @@ extern crate ndarray;
 extern crate timely;
 extern crate timely_communication;
 
+use ml_dataflow::models::TrainingData;
 use flexi_logger::Logger;
 use ml_dataflow::models::spdt::*;
 use ml_dataflow::models::spdt::impurity::Gini;
