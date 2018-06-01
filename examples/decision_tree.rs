@@ -6,6 +6,7 @@ extern crate timely;
 extern crate timely_communication;
 
 use flexi_logger::Logger;
+use ml_dataflow::data::serialization::{AbomonableArray, AsView};
 use ml_dataflow::models::spdt::impurity::Gini;
 use ml_dataflow::models::spdt::*;
 use ml_dataflow::models::StreamingSupModel;
@@ -20,8 +21,8 @@ fn main() {
         .unwrap();
     ::timely::execute(Configuration::Process(2), move |root| {
         let x = arr2(&[
-            [0., 0., 0., 0., 0.],
-            [0., 0., 0., 0., 0.],
+            [10., 5., 10., 10., 50.],
+            [10., 5., 10., 10., 50.],
             [1., 0., 2., 0., 3.],
             [1., 0., 2., 0., 3.],
             [5., 5., 5., 5., 5.],
@@ -34,7 +35,7 @@ fn main() {
 
         let y: Array1<usize> = arr1(&[0, 0, 2, 2, 1, 1, 1, 1, 3, 3]);
 
-        let mut model = StreamingDecisionTree::<Gini>::new(5, 500_000, 10);
+        let mut model = StreamingDecisionTree::<Gini>::new(20, 500_000, 5);
 
         root.dataflow::<usize, _, _>(|scope| {
             let training_stream = vec![
@@ -47,10 +48,17 @@ fn main() {
                     y: y.clone().into(),
                 },
             ].to_stream(scope);
-            model
+            let trees = model
                 .train(scope, training_stream)
                 .expect("Training model")
                 .inspect(|x| println!("Results: {:?}", x));
+            model
+                .predict(
+                    trees,
+                    vec![AbomonableArray::from(x.clone())].to_stream(scope),
+                )
+                .unwrap()
+                .inspect(|d| println!("{}", d.view()));
         });
         while root.step() {}
     }).expect("Execute dataflow");
