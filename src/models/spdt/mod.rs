@@ -151,7 +151,15 @@ where
     }
 }
 
+
+/// Extension trait for a stream of `TrainingData<T, L>`
 trait SegmentTrainingData<S: Scope, T: Data, L: Data> {
+    /// Segments training data that comes in on one timestamp into a maximum of
+    /// `items_per_segment` items. This is used so that on a continuous stream of
+    /// data, trees can be created with reasonably sized chunks of data.
+    /// Expects the scope where the operator is used to have a Product(Timestamp, u64)
+    /// timestamp, where the inner timestamp will be used to indicate the segment number
+    /// of data
     fn segment_training_data(&self, items_per_segment: u64) -> Stream<S, TrainingData<T, L>>;
 }
 

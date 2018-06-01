@@ -106,7 +106,10 @@ impl<T: Ord, D> ExtractUnordered<T, D> for ::std::sync::mpsc::Receiver<Event<T, 
     }
 }
 
+/// Extension trait for `Stream`.
 pub trait ExchangeEvenly<S: Scope, D: ExchangeData> {
+    /// Exchanges records so they are evenly distributed between
+    /// all available workers.
     fn exchange_evenly(&self) -> Stream<S, D>;
 }
 
@@ -128,7 +131,15 @@ impl<S: Scope, D: ExchangeData> ExchangeEvenly<S, D> for Stream<S, D> {
     }
 }
 
+/// Extension trait for `Stream`.
 pub trait Branch<S: Scope, D: Data> {
+    /// Takes one input stream and splits it into two output streams.
+    /// For each record, the supplied closure is called with a reference to
+    /// the data and its time. If it returns true, the record will be sent
+    /// to the second returned stream, otherwise it will be sent to the first.
+    ///
+    /// If the result of the closure only depends on the time, not the data,
+    /// `branch_when` should be used instead.
     fn branch(
         &self,
         condition: impl Fn(&S::Timestamp, &D) -> bool + 'static,
@@ -169,7 +180,12 @@ impl<S: Scope, D: Data> Branch<S, D> for Stream<S, D> {
     }
 }
 
+/// Extension trait for `Stream`.
 pub trait BranchWhen<S: Scope, D: Data> {
+    /// Takes one input stream and splits it into two output streams.
+    /// For each time, the supplied closure is called. If it returns true,
+    /// the records for that will be sent to the second returned stream, otherwise
+    /// they will be sent to the first.
     fn branch_when(
         &self,
         condition: impl Fn(&S::Timestamp) -> bool + 'static,
@@ -194,9 +210,9 @@ impl<S: Scope, D: Data> BranchWhen<S, D> for Stream<S, D> {
 
                 input.for_each(|time, data| {
                     let mut out = if condition(&time.time()) {
-                        output1_handle.session(&time)
-                    } else {
                         output2_handle.session(&time)
+                    } else {
+                        output1_handle.session(&time)
                     };
                     out.give_content(data);
                 });

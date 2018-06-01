@@ -210,6 +210,7 @@ mod test {
                 feature: 0,
                 threshold: 1,
             },
+            None
         );
         let (red_and_not_green, red_green) = tree.split(
             red,
@@ -217,6 +218,7 @@ mod test {
                 feature: 1,
                 threshold: 1,
             },
+            None
         );
         let (pure_red, _) = tree.split(
             red_and_not_green,
@@ -224,6 +226,7 @@ mod test {
                 feature: 2,
                 threshold: 1,
             },
+            None
         );
         tree.label(pure_red, "Pure Red");
 
@@ -240,6 +243,6 @@ mod test {
             tree.descend_iter(v_blue.view()).collect::<Vec<_>>()
         );
 
-        assert_eq!("Pure Red", tree.descend(v_red.view()).unwrap());
+        assert_eq!("Pure Red", *tree.descend(v_red.view()).unwrap());
     }
 }

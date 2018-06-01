@@ -2,6 +2,9 @@ use models::spdt::histogram::operators::HistogramCollection;
 use models::spdt::tree::NodeIndex;
 
 pub trait Impurity {
+    /// Calculates how much the impurity in the tree would be reduced if
+    /// it was split at the given node, attribute and split point. The `HistogramCollection`
+    /// is expected to contain all histograms for each attribute and label at this node.
     fn impurity_delta<L>(
         histograms: &HistogramCollection<L>,
         node: NodeIndex,

@@ -12,6 +12,9 @@ use timely::Data;
 /// Operator that splits the unlabeled leaf nodes in a decision tree according to Histogram data
 pub trait SplitLeaves<T, L, S: Scope> {
     /// Split all unlabeled leaves where a split would improve the classification accuracy
+    /// if the innermost `time` exceeds the given maximum `levels`, the operator will stop
+    /// splitting and instead only label the remaining leaf nodes with the most commonly
+    /// occuring labels that reach the node.
     fn split_leaves<I: Impurity>(&self, levels: u64, bins: u64) -> Stream<S, (usize, DecisionTree<T, L>)>;
 }
 
