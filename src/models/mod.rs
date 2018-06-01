@@ -25,7 +25,7 @@ pub trait StreamingSupModel<
     /// Predict output from inputs.
     fn predict<S: Scope>(
         &mut self,
-        scope: &mut S,
+        training_results: Stream<S, TrainingOutput>,
         inputs: Stream<S, PredictionInput>,
     ) -> Result<Stream<S, Predictions>>;
 
@@ -57,7 +57,7 @@ pub trait StreamingUnSupModel<Inputs: IndexableData, Predictions, TrainingOutput
     /// Predict output from inputs.
     fn predict<S: Scope>(
         &mut self,
-        scope: &mut S,
+        training_results: Stream<S, TrainingOutput>,
         inputs: Stream<S, Inputs>,
     ) -> Result<Stream<S, Predictions>>;
 

@@ -168,3 +168,41 @@ impl<S: Scope, D: Data> Branch<S, D> for Stream<S, D> {
         (stream1, stream2)
     }
 }
+
+pub trait BranchWhen<S: Scope, D: Data> {
+    fn branch_when(
+        &self,
+        condition: impl Fn(&S::Timestamp) -> bool + 'static,
+    ) -> (Stream<S, D>, Stream<S, D>);
+}
+
+impl<S: Scope, D: Data> BranchWhen<S, D> for Stream<S, D> {
+    fn branch_when(
+        &self,
+        condition: impl Fn(&S::Timestamp) -> bool + 'static,
+    ) -> (Stream<S, D>, Stream<S, D>) {
+        let mut builder = OperatorBuilder::new("Branch".to_owned(), self.scope());
+
+        let mut input = builder.new_input(self, Pipeline);
+        let (mut output1, stream1) = builder.new_output();
+        let (mut output2, stream2) = builder.new_output();
+
+        builder.build(move |_| {
+            move |_frontiers| {
+                let mut output1_handle = output1.activate();
+                let mut output2_handle = output2.activate();
+
+                input.for_each(|time, data| {
+                    let mut out = if condition(&time.time()) {
+                        output1_handle.session(&time)
+                    } else {
+                        output2_handle.session(&time)
+                    };
+                    out.give_content(data);
+                });
+            }
+        });
+
+        (stream1, stream2)
+    }
+}

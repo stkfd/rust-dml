@@ -4,6 +4,7 @@
 #![allow(dead_code)]
 
 use ndarray::prelude::*;
+use ndarray::Zip;
 use std::cmp::Ordering;
 use std::ops::{Index, IndexMut};
 
@@ -28,7 +29,12 @@ impl<T, L> DecisionTree<T, L> {
         self.root
     }
 
-    pub fn split(&mut self, node: NodeIndex, rule: Rule<T>, label: Option<L>) -> (NodeIndex, NodeIndex) {
+    pub fn split(
+        &mut self,
+        node: NodeIndex,
+        rule: Rule<T>,
+        label: Option<L>,
+    ) -> (NodeIndex, NodeIndex) {
         let l = self.new_leaf(None);
         let r = self.new_leaf(None);
         self[node] = Node::Inner { rule, l, r, label };
@@ -69,13 +75,26 @@ impl<T, L> DecisionTree<T, L> {
     }
 }
 
-impl<T: PartialOrd, L: Clone> DecisionTree<T, L> {
-    pub fn descend<'a, 'b: 'a>(&'b self, value: ArrayView1<'a, T>) -> Option<L> {
-        let last_node_id = self.descend_iter(value).last()?;
-        match &self[last_node_id] {
-            Node::Leaf { label } => label.clone(),
-            Node::Inner { .. } => panic!("Tree ended on a non-leaf node"),
-        }
+impl<T: PartialOrd, L: Copy> DecisionTree<T, L> {
+    pub fn predict_samples(&self, samples: ArrayView2<T>) -> Array1<L> {
+        let mut labels = unsafe { Array1::uninitialized(samples.rows()) };
+
+        Zip::from(&mut labels)
+            .and(samples.outer_iter())
+            .apply(|label, sample| {
+                *label = *self.descend(sample).expect("Point label");
+            });
+        
+        labels
+    }
+
+    pub fn descend<'a, 'b: 'a>(&'b self, value: ArrayView1<'a, T>) -> Option<&L> {
+        self.descend_iter(value)
+            .filter_map(|node_id| match &self[node_id] {
+                Node::Leaf { label: Some(label) } => Some(label),
+                _ => None,
+            })
+            .last()
     }
 
     pub fn descend_iter<'a, 'b: 'a>(

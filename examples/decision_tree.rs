@@ -5,11 +5,11 @@ extern crate ndarray;
 extern crate timely;
 extern crate timely_communication;
 
-use ml_dataflow::models::TrainingData;
 use flexi_logger::Logger;
-use ml_dataflow::models::spdt::*;
 use ml_dataflow::models::spdt::impurity::Gini;
+use ml_dataflow::models::spdt::*;
 use ml_dataflow::models::StreamingSupModel;
+use ml_dataflow::models::TrainingData;
 use ndarray::prelude::*;
 use timely::dataflow::operators::*;
 use timely_communication::initialize::Configuration;
@@ -47,7 +47,10 @@ fn main() {
                     y: y.clone().into(),
                 },
             ].to_stream(scope);
-            model.train(scope, training_stream).expect("Training model");
+            model
+                .train(scope, training_stream)
+                .expect("Training model")
+                .inspect(|x| println!("Results: {:?}", x));
         });
         while root.step() {}
     }).expect("Execute dataflow");

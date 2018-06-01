@@ -32,6 +32,8 @@ impl<S: Scope<Timestamp = Product<Ts1, u64>>, Ts1: Timestamp, L: Data + Copy + P
                                 if histograms.node_has_samples(leaf) {
                                     let (split_attr, (delta, split_location)) = (0..n_attributes)
                                         .map(|attr| {
+                                            // merge all histograms for a node & attribute, combining the ones
+                                            // for individual labels
                                             let merged_histograms = histograms
                                                 .get_by_node_attribute(leaf, attr)
                                                 .expect("Get histograms by node/attribute")
