@@ -1,6 +1,6 @@
 use super::*;
 use models::spdt::histogram::operators::TreeWithHistograms;
-use models::spdt::histogram::*;
+use models::spdt::histogram::Histogram;
 use models::spdt::tree::DecisionTree;
 use timely::dataflow::channels::pact::Pipeline;
 use timely::dataflow::operators::Operator;
@@ -15,13 +15,24 @@ pub trait SplitLeaves<T, L, S: Scope> {
     /// if the innermost `time` exceeds the given maximum `levels`, the operator will stop
     /// splitting and instead only label the remaining leaf nodes with the most commonly
     /// occuring labels that reach the node.
-    fn split_leaves<I: Impurity>(&self, levels: u64, bins: u64) -> Stream<S, (usize, DecisionTree<T, L>)>;
+    fn split_leaves<I: Impurity>(
+        &self,
+        levels: u64,
+        bins: u64,
+    ) -> Stream<S, (usize, DecisionTree<T, L>)>;
 }
 
-impl<S: Scope<Timestamp = Product<Ts1, u64>>, Ts1: Timestamp, L: Data + Copy + PartialEq + Debug>
-    SplitLeaves<f64, L, S> for Stream<S, TreeWithHistograms<f64, L>>
+impl<
+        S: Scope<Timestamp = Product<Ts1, u64>>,
+        Ts1: Timestamp,
+        L: Data + Copy + PartialEq + Debug,
+    > SplitLeaves<f64, L, S> for Stream<S, TreeWithHistograms<f64, L>>
 {
-    fn split_leaves<I: Impurity>(&self, levels: u64, bins: u64) -> Stream<S, (usize, DecisionTree<f64, L>)> {
+    fn split_leaves<I: Impurity>(
+        &self,
+        levels: u64,
+        bins: u64,
+    ) -> Stream<S, (usize, DecisionTree<f64, L>)> {
         self.unary(Pipeline, "BuildTree", |_| {
             move |input, output| {
                 input.for_each(move |time, data| {
@@ -41,10 +52,13 @@ impl<S: Scope<Timestamp = Product<Ts1, u64>>, Ts1: Timestamp, L: Data + Copy + P
                                                 .get_by_node_attribute(leaf, attr)
                                                 .expect("Get histograms by node/attribute")
                                                 .iter()
-                                                .fold(Histogram::new(bins as usize), move |mut acc, h| {
-                                                    acc.merge(&h.1);
-                                                    acc
-                                                });
+                                                .fold(
+                                                    Histogram::new(bins as usize),
+                                                    move |mut acc, h| {
+                                                        acc.merge(&h.1);
+                                                        acc
+                                                    },
+                                                );
 
                                             // calculate impurity delta for each candidate split and return the highest
                                             let best_delta_and_split = merged_histograms

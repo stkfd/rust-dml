@@ -1,4 +1,4 @@
-use models::spdt::histogram::operators::HistogramCollection;
+use models::spdt::histogram::HistogramCollection;
 use models::spdt::tree::NodeIndex;
 
 pub trait Impurity {

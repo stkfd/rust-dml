@@ -1,5 +1,8 @@
 #![allow(dead_code)]
+pub mod collection;
 pub mod operators;
+
+pub use self::collection::*;
 
 use float_cmp::{ApproxEq, Ulps};
 use std::cmp::Ordering;

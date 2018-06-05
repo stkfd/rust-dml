@@ -1,6 +1,7 @@
 use super::*;
+use super::collection::HistogramCollection;
 use fnv::FnvHashMap;
-use models::spdt::tree::{DecisionTree, Node, NodeIndex};
+use models::spdt::tree::{DecisionTree, Node};
 use models::spdt::TrainingData;
 use std::hash::Hash;
 use timely::dataflow::channels::pact::Pipeline;
@@ -10,133 +11,19 @@ use timely::progress::nested::product::Product;
 use timely::progress::Timestamp;
 use timely::{Data, ExchangeData};
 
+/// Convenience type for a combination of:
+/// (decision tree, histogram set for the tree, number of attributes in the dataset)
+/// 
+/// TODO: the number of attributes does not really fit here semantically, however the
+/// `CreateHistogram` operator which returns this type is the best place to determine
+/// this number.
 pub type TreeWithHistograms<T, L> = (DecisionTree<T, L>, HistogramCollection<L>, usize);
 
-#[derive(Clone, Copy, Debug, Abomonation, PartialEq, Eq, Hash)]
-pub struct HistogramIndex {
-    pub node_index: usize,
-    pub attribute: usize,
-    pub class_index: usize,
-}
-
-#[allow(type_complexity)]
-#[derive(Clone, Debug, Abomonation)]
-pub struct HistogramCollection<L> {
-    collection: Vec<(NodeIndex, Vec<Vec<(L, Histogram)>>)>,
-}
-
-impl<L> Default for HistogramCollection<L> {
-    fn default() -> Self {
-        HistogramCollection { collection: vec![] }
-    }
-}
-
-impl<L: Copy + PartialEq> HistogramCollection<L> {
-    pub fn get_mut(
-        &mut self,
-        node_index: NodeIndex,
-        attribute: usize,
-        label: L,
-    ) -> Option<&mut Histogram> {
-        self.collection
-            .iter_mut()
-            .find(|(i, _)| *i == node_index)
-            .and_then(|n| n.1.get_mut(attribute))
-            .and_then(|by_label| {
-                by_label
-                    .iter_mut()
-                    .find(|(l, _)| *l == label)
-                    .and_then(|h| Some(&mut h.1))
-            })
-    }
-
-    // determine if any samples arrive at the node
-    pub fn node_has_samples(&self, node_index: NodeIndex) -> bool {
-        self.collection.iter().any(|(i, _)| *i == node_index)
-    }
-
-    pub fn get(&self, node_index: NodeIndex, attribute: usize, label: L) -> Option<&Histogram> {
-        self.get_by_node_attribute(node_index, attribute)
-            .and_then(|by_label| {
-                by_label
-                    .iter()
-                    .find(|(l, _)| *l == label)
-                    .and_then(|h| Some(&h.1))
-            })
-    }
-
-    #[inline]
-    pub fn get_by_node_attribute(
-        &self,
-        node_index: NodeIndex,
-        attribute: usize,
-    ) -> Option<&Vec<(L, Histogram)>> {
-        self.collection
-            .iter()
-            .find(|(i, _)| *i == node_index)
-            .and_then(|n| n.1.get(attribute))
-    }
-
-    #[inline]
-    pub fn get_by_node(&self, node_index: NodeIndex) -> Option<&Vec<Vec<(L, Histogram)>>> {
-        self.collection
-            .iter()
-            .find(|(i, _)| *i == node_index)
-            .and_then(|(_, histograms)| Some(histograms))
-    }
-
-    pub fn insert(
-        &mut self,
-        histogram: Histogram,
-        node_index: NodeIndex,
-        attribute_index: usize,
-        label: L,
-    ) {
-        let by_node =
-            if let Some(position) = self.collection.iter().position(|(i, _)| *i == node_index) {
-                &mut self.collection[position].1
-            } else {
-                self.collection.push((node_index, vec![]));
-                let p = self.collection.len() - 1;
-                &mut self.collection[p].1
-            };
-
-        if by_node.len() <= attribute_index {
-            by_node.resize(attribute_index + 1, vec![]);
-        };
-        let by_attr = &mut by_node[attribute_index];
-
-        by_attr.push((label, histogram));
-    }
-
-    /// Merge another collection of Histograms into this collection
-    pub fn merge(&mut self, mut other: HistogramCollection<L>) {
-        for (node_index, mut by_node) in other.collection.drain(..) {
-            for (attr, mut by_attr) in by_node.drain(..).enumerate() {
-                for (label, new_histogram) in by_attr.drain(..) {
-                    if let Some(histogram) = self.get_mut(node_index, attr, label) {
-                        histogram.merge(&new_histogram);
-                    }
-                    if self.get(node_index, attr, label).is_none() {
-                        self.insert(new_histogram, node_index, attr, label);
-                    }
-                }
-            }
-        }
-    }
-
-    pub fn get_node_label(&self, node: NodeIndex) -> Option<L> {
-        let histograms = &self.get_by_node(node)?.get(0)?;
-
-        histograms
-            .iter()
-            .map(|(label, h)| (label, h.sum_total()))
-            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(Ordering::Less))
-            .and_then(|most_common| Some(*most_common.0))
-    }
-}
-
+/// Extension trait for timely `Stream`
 pub trait CreateHistograms<S: Scope, T: Data, L: Data> {
+    /// Takes a set of `TrainingData` and a stream of decision trees (as they are created).
+    /// For each decision tree, compiles a set of histograms describing the samples which
+    /// arrive at each unlabeled leaf node in the tree.
     fn create_histograms(
         &self,
         training_data: &Stream<S, TrainingData<T, L>>,
