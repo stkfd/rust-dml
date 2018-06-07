@@ -5,17 +5,21 @@ use models::spdt::tree::NodeIndex;
 /// the leaf nodes in a decision tree.
 #[allow(type_complexity)]
 #[derive(Clone, Debug, Abomonation)]
-pub struct HistogramCollection<L> {
-    collection: Vec<(NodeIndex, Vec<Vec<(L, Histogram)>>)>,
+pub struct HistogramCollection<T: Float, L> {
+    collection: Vec<(NodeIndex, Vec<Vec<(L, Histogram<T>)>>)>,
 }
 
-impl<L> Default for HistogramCollection<L> {
+impl<T: Float, L> Default for HistogramCollection<T, L> {
     fn default() -> Self {
         HistogramCollection { collection: vec![] }
     }
 }
 
-impl<L: Copy + PartialEq> HistogramCollection<L> {
+impl<T, L> HistogramCollection<T, L>
+where
+    T: HFloat,
+    L: Copy + PartialEq,
+{
     /// Get a mutable reference to a histogram for a node/attribute/label
     /// combination
     pub fn get_mut(
@@ -23,7 +27,7 @@ impl<L: Copy + PartialEq> HistogramCollection<L> {
         node_index: NodeIndex,
         attribute: usize,
         label: L,
-    ) -> Option<&mut Histogram> {
+    ) -> Option<&mut Histogram<T>> {
         self.collection
             .iter_mut()
             .find(|(i, _)| *i == node_index)
@@ -42,7 +46,7 @@ impl<L: Copy + PartialEq> HistogramCollection<L> {
     }
 
     /// Get the histogram with the given node/attribute/label combination
-    pub fn get(&self, node_index: NodeIndex, attribute: usize, label: L) -> Option<&Histogram> {
+    pub fn get(&self, node_index: NodeIndex, attribute: usize, label: L) -> Option<&Histogram<T>> {
         self.get_by_node_attribute(node_index, attribute)
             .and_then(|by_label| {
                 by_label
@@ -58,7 +62,7 @@ impl<L: Copy + PartialEq> HistogramCollection<L> {
         &self,
         node_index: NodeIndex,
         attribute: usize,
-    ) -> Option<&Vec<(L, Histogram)>> {
+    ) -> Option<&Vec<(L, Histogram<T>)>> {
         self.collection
             .iter()
             .find(|(i, _)| *i == node_index)
@@ -67,7 +71,7 @@ impl<L: Copy + PartialEq> HistogramCollection<L> {
 
     /// Gets all histograms at a given node
     #[inline]
-    pub fn get_by_node(&self, node_index: NodeIndex) -> Option<&Vec<Vec<(L, Histogram)>>> {
+    pub fn get_by_node(&self, node_index: NodeIndex) -> Option<&Vec<Vec<(L, Histogram<T>)>>> {
         self.collection
             .iter()
             .find(|(i, _)| *i == node_index)
@@ -80,7 +84,7 @@ impl<L: Copy + PartialEq> HistogramCollection<L> {
     /// exists.
     pub fn insert(
         &mut self,
-        histogram: Histogram,
+        histogram: Histogram<T>,
         node_index: NodeIndex,
         attribute_index: usize,
         label: L,
@@ -103,7 +107,7 @@ impl<L: Copy + PartialEq> HistogramCollection<L> {
     }
 
     /// Merge another collection of Histograms into this collection
-    pub fn merge(&mut self, mut other: HistogramCollection<L>) {
+    pub fn merge(&mut self, mut other: HistogramCollection<T, L>) {
         for (node_index, mut by_node) in other.collection.drain(..) {
             for (attr, mut by_attr) in by_node.drain(..).enumerate() {
                 for (label, new_histogram) in by_attr.drain(..) {

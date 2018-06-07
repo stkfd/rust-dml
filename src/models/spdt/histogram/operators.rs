@@ -17,10 +17,10 @@ use timely::{Data, ExchangeData};
 /// TODO: the number of attributes does not really fit here semantically, however the
 /// `CreateHistogram` operator which returns this type is the best place to determine
 /// this number.
-pub type TreeWithHistograms<T, L> = (DecisionTree<T, L>, HistogramCollection<L>, usize);
+pub type TreeWithHistograms<T, L> = (DecisionTree<T, L>, HistogramCollection<T, L>, usize);
 
 /// Extension trait for timely `Stream`
-pub trait CreateHistograms<S: Scope, T: Data, L: Data> {
+pub trait CreateHistograms<S: Scope, T: Data + Float, L: Data> {
     /// Takes a set of `TrainingData` and a stream of decision trees (as they are created).
     /// For each decision tree, compiles a set of histograms describing the samples which
     /// arrive at each unlabeled leaf node in the tree.
@@ -35,7 +35,7 @@ pub trait CreateHistograms<S: Scope, T: Data, L: Data> {
 impl<
         S: Scope<Timestamp = Product<TsOuter, u64>>,
         TsOuter: Timestamp,
-        T: Data + PartialOrd + Into<f64> + Copy,
+        T: HFloat + Data,
         L: Data + Into<usize> + Copy + PartialEq,
     > CreateHistograms<S, T, L> for Stream<S, DecisionTree<T, L>>
 {
@@ -109,7 +109,7 @@ impl<
                             debug!("{:?}", data_stash.keys());
                             let (_, _, data) = data_stash.get(&time.outer).expect("Retrieve data");
                             //let tree = tree_stash.remove(time).expect("Retrieve decision tree");
-                            let mut histograms = HistogramCollection::<L>::default();
+                            let mut histograms = HistogramCollection::<T, L>::default();
 
                             for training_data in data {
                                 let x = training_data.x();
@@ -140,7 +140,7 @@ impl<
                                                 .get_mut(node_index, i_attr, *y_i)
                                                 .unwrap();
 
-                                            histogram.update((*x_i).into());
+                                            histogram.update(*x_i);
                                         }
                                     }
                                 }
@@ -166,11 +166,11 @@ impl<
     }
 }
 
-pub trait AggregateHistograms<S: Scope, T: ExchangeData, L: ExchangeData> {
+pub trait AggregateHistograms<S: Scope, T: ExchangeData + Float, L: ExchangeData> {
     fn aggregate_histograms(&self) -> Stream<S, TreeWithHistograms<T, L>>;
 }
 
-impl<S: Scope, T: ExchangeData, L: ExchangeData + Hash + Eq + Copy> AggregateHistograms<S, T, L>
+impl<S: Scope, T: HFloat + ExchangeData, L: ExchangeData + Hash + Eq + Copy> AggregateHistograms<S, T, L>
     for Stream<S, TreeWithHistograms<T, L>>
 {
     fn aggregate_histograms(&self) -> Stream<S, TreeWithHistograms<T, L>> {

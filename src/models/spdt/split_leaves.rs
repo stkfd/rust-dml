@@ -1,3 +1,5 @@
+use num_traits::Float;
+use models::spdt::histogram::HFloat;
 use super::*;
 use models::spdt::histogram::operators::TreeWithHistograms;
 use models::spdt::histogram::Histogram;
@@ -10,12 +12,12 @@ use timely::progress::Timestamp;
 use timely::Data;
 
 /// Operator that splits the unlabeled leaf nodes in a decision tree according to Histogram data
-pub trait SplitLeaves<T, L, S: Scope> {
+pub trait SplitLeaves<T: Float, L, S: Scope> {
     /// Split all unlabeled leaves where a split would improve the classification accuracy
     /// if the innermost `time` exceeds the given maximum `levels`, the operator will stop
     /// splitting and instead only label the remaining leaf nodes with the most commonly
     /// occuring labels that reach the node.
-    fn split_leaves<I: Impurity>(
+    fn split_leaves<I: Impurity<T, L>>(
         &self,
         levels: u64,
         bins: u64,
@@ -25,14 +27,15 @@ pub trait SplitLeaves<T, L, S: Scope> {
 impl<
         S: Scope<Timestamp = Product<Ts1, u64>>,
         Ts1: Timestamp,
+        T: HFloat + Data,
         L: Data + Copy + PartialEq + Debug,
-    > SplitLeaves<f64, L, S> for Stream<S, TreeWithHistograms<f64, L>>
+    > SplitLeaves<T, L, S> for Stream<S, TreeWithHistograms<T, L>>
 {
-    fn split_leaves<I: Impurity>(
+    fn split_leaves<I: Impurity<T, L>>(
         &self,
         levels: u64,
         bins: u64,
-    ) -> Stream<S, (usize, DecisionTree<f64, L>)> {
+    ) -> Stream<S, (usize, DecisionTree<T, L>)> {
         self.unary(Pipeline, "BuildTree", |_| {
             move |input, output| {
                 input.for_each(move |time, data| {
@@ -96,7 +99,7 @@ impl<
                                         })
                                         .expect("Choose best split attribute");
 
-                                    if delta > 0. {
+                                    if delta > T::zero() {
                                         debug!("Splitting tree node {:?} with attribute {} < {}: delta {}",leaf, split_attr, split_location, delta);
                                         let label = histograms.get_node_label(leaf);
 
