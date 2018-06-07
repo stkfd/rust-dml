@@ -19,10 +19,6 @@ where
 {
 }
 
-fn flt<T: Float>(primitive: f64) -> T {
-    T::from(primitive).unwrap()
-}
-
 #[derive(Abomonation, Debug, Clone, PartialEq)]
 pub struct Histogram<T: Float> {
     bins: usize,
@@ -321,6 +317,10 @@ impl<T: Float> Ord for Bin<T> {
     fn cmp(&self, other: &Bin<T>) -> Ordering {
         self.p.partial_cmp(&other.p).unwrap()
     }
+}
+
+fn flt<T: Float>(primitive: f64) -> T {
+    T::from(primitive).unwrap()
 }
 
 fn bin<T: Float>(p: T, m: T) -> Bin<T> {

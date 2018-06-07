@@ -20,7 +20,7 @@ extern crate ndarray;
 extern crate ndarray_linalg;
 extern crate num_traits;
 extern crate rand;
-#[macro_use]
+#[cfg_attr(test, macro_use)]
 extern crate approx;
 extern crate fnv;
 

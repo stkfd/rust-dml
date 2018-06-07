@@ -18,7 +18,7 @@ failure="0.1"
 derive_more="0.11"
 itertools="0.7"
 num-traits = "0.2"
-rand="0.4"
+rand="0.5"
 approx="0.2"
 fnv = "1.0.5"
 
