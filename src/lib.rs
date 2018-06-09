@@ -1,4 +1,4 @@
-#![feature(try_from, associated_type_defaults, specialization, map_entry_replace, nll)]
+#![feature(try_from, associated_type_defaults, specialization, map_entry_replace, generic_associated_types)]
 
 extern crate abomonation;
 #[macro_use]
