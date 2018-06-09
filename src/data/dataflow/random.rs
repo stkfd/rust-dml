@@ -10,13 +10,17 @@ use timely::dataflow::Scope;
 use timely::dataflow::Stream;
 use timely::Data;
 
+/// Configuration for random distributions
 pub mod params {
     use rand::distributions::uniform::SampleUniform;
     use rand::distributions::{Distribution, Normal, Uniform};
 
+    /// Trait for a struct that can generate an instance of an associated
+    /// `Distribution<T>`
     pub trait ToDistribution<T> {
         type Dist: Distribution<T>;
 
+        /// Create a `Distribution` instance from this configuration
         fn to_distribution(&self) -> Self::Dist;
     }
 
@@ -98,16 +102,19 @@ where
     D1: ToDistribution<T> + 'static,
     D2: ToDistribution<L> + 'static,
 {
+    /// Configure the random distributions for the training input data
     pub fn x_distributions(mut self, dist: Array2<D1>) -> Self {
         self.x_dist = dist;
         self
     }
 
+    /// Configure the random distributions for the training output data
     pub fn y_distributions(mut self, dist: Array1<D2>) -> Self {
         self.y_dist = dist;
         self
     }
 
+    /// Configure the number of samples generated
     pub fn samples(self, samples_per_chunk: usize, chunks_per_round: usize, rounds: usize) -> Self {
         RandomTrainingSource {
             samples_per_chunk,
@@ -117,6 +124,8 @@ where
         }
     }
 
+    /// Create a stream that produces random data
+    /// using the configuration in this instance
     pub fn to_stream<'s, S: Scope>(
         &self,
         scope: &Child<'s, S, u64>,
