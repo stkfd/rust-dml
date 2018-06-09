@@ -10,6 +10,8 @@ use timely::Data;
 use timely::ExchangeData;
 use Result;
 
+mod random;
+
 /// A container for result data coming in asynchronously from somewhere. Internally uses the `std::sync::mpsc`
 /// channels for receiving the data.
 pub enum AsyncResult<T> {
