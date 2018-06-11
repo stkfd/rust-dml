@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use data::dataflow::random::params::ToDistribution;
 use models::TrainingData;
 use ndarray::prelude::*;
