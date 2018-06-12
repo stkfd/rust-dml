@@ -1,8 +1,8 @@
 use super::*;
 use super::collection::HistogramCollection;
 use fnv::FnvHashMap;
-use models::spdt::tree::{DecisionTree, Node};
-use models::spdt::TrainingData;
+use models::decision_tree::tree::{DecisionTree, Node};
+use data::TrainingData;
 use std::hash::Hash;
 use timely::dataflow::channels::pact::Pipeline;
 use timely::dataflow::operators::{aggregation::Aggregate, Map, Operator};

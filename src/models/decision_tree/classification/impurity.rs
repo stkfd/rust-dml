@@ -1,7 +1,7 @@
 use num_traits::Float;
-use models::spdt::histogram::HFloat;
-use models::spdt::histogram::HistogramCollection;
-use models::spdt::tree::NodeIndex;
+use models::decision_tree::classification::histogram::HFloat;
+use models::decision_tree::classification::histogram::HistogramCollection;
+use models::decision_tree::tree::NodeIndex;
 
 pub trait Impurity<T: Float, L> {
     /// Calculates how much the impurity in the tree would be reduced if

@@ -1,5 +1,5 @@
 use super::*;
-use models::spdt::tree::NodeIndex;
+use models::decision_tree::tree::NodeIndex;
 
 /// Holds a set of histograms describing the samples reaching
 /// the leaf nodes in a decision tree.

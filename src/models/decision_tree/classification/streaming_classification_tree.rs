@@ -1,15 +1,17 @@
-use num_traits::Float;
-use models::spdt::histogram::HFloat;
-use super::histogram::operators::*;
 use super::impurity::*;
-use super::split_leaves::*;
-use super::tree::*;
 use super::SegmentTrainingData;
 use data::dataflow::{Branch, ExchangeEvenly};
 use data::serialization::*;
+use data::TrainingData;
 use fnv::FnvHashMap;
+use models::decision_tree::classification::{
+    histogram::operators::{CreateHistograms, AggregateHistograms},
+    histogram::HFloat,
+    split_leaves::SplitLeaves,
+};
+use models::decision_tree::tree::DecisionTree;
 use models::StreamingSupModel;
-use models::TrainingData;
+use num_traits::Float;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::marker::PhantomData;
@@ -26,7 +28,7 @@ pub struct StreamingClassificationTree<I: Impurity<T, L>, T: Float, L> {
     bins: usize,
     _impurity_algo: PhantomData<I>,
     _t: PhantomData<T>,
-    _l: PhantomData<L>
+    _l: PhantomData<L>,
 }
 
 impl<I: Impurity<T, L>, T: Float, L> StreamingClassificationTree<I, T, L> {
@@ -38,7 +40,7 @@ impl<I: Impurity<T, L>, T: Float, L> StreamingClassificationTree<I, T, L> {
             bins,
             _impurity_algo: PhantomData,
             _t: PhantomData,
-            _l: PhantomData
+            _l: PhantomData,
         }
     }
 }
@@ -111,7 +113,8 @@ where
         let levels = self.levels;
 
         let results = scope.scoped::<u64, _, _>(|data_segments_scope| {
-            let training_data = data.enter(data_segments_scope)
+            let training_data = data
+                .enter(data_segments_scope)
                 .segment_training_data(data_segments_scope.peers() as u64 * self.points_per_worker)
                 .exchange_evenly();
 

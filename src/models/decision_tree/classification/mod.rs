@@ -1,17 +1,16 @@
 #![allow(unknown_lints)]
 
-mod classification;
 mod histogram;
 pub mod impurity;
 mod split_leaves;
-mod tree;
+mod streaming_classification_tree;
 
-pub use self::classification::StreamingClassificationTree;
+pub use self::streaming_classification_tree::StreamingClassificationTree;
 
+use super::tree::*;
 use self::impurity::*;
-use self::tree::*;
 use fnv::FnvHashMap;
-use models::TrainingData;
+use data::TrainingData;
 use std::fmt::Debug;
 use timely::dataflow::channels::pact::Pipeline;
 use timely::dataflow::operators::*;

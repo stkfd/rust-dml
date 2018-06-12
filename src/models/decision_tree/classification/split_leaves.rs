@@ -1,9 +1,9 @@
-use num_traits::Float;
-use models::spdt::histogram::HFloat;
 use super::*;
-use models::spdt::histogram::operators::TreeWithHistograms;
-use models::spdt::histogram::Histogram;
-use models::spdt::tree::DecisionTree;
+use models::decision_tree::classification::histogram::operators::TreeWithHistograms;
+use models::decision_tree::classification::histogram::HFloat;
+use models::decision_tree::classification::histogram::Histogram;
+use models::decision_tree::tree::DecisionTree;
+use num_traits::Float;
 use timely::dataflow::channels::pact::Pipeline;
 use timely::dataflow::operators::Operator;
 use timely::dataflow::{Scope, Stream};

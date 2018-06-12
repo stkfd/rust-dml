@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use data::dataflow::random::params::ToDistribution;
-use models::TrainingData;
+use data::TrainingData;
 use ndarray::prelude::*;
 use rand::distributions::Uniform;
 use rand::prelude::*;
