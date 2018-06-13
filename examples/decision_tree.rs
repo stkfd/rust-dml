@@ -7,10 +7,10 @@ extern crate timely_communication;
 
 use flexi_logger::Logger;
 use ml_dataflow::data::serialization::{AbomonableArray, AsView};
-use ml_dataflow::models::tree::classification::impurity::Gini;
-use ml_dataflow::models::tree::classification::*;
+use ml_dataflow::models::decision_tree::classification::impurity::Gini;
+use ml_dataflow::models::decision_tree::classification::*;
 use ml_dataflow::models::StreamingSupModel;
-use ml_dataflow::models::TrainingData;
+use ml_dataflow::data::TrainingData;
 use ndarray::prelude::*;
 use timely::dataflow::operators::*;
 use timely_communication::initialize::Configuration;

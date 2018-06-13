@@ -8,7 +8,6 @@ mod streaming_classification_tree;
 pub use self::streaming_classification_tree::StreamingClassificationTree;
 
 use super::tree::*;
-use self::impurity::*;
 use fnv::FnvHashMap;
 use data::TrainingData;
 use std::fmt::Debug;

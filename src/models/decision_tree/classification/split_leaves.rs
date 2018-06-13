@@ -1,7 +1,8 @@
 use super::*;
-use models::decision_tree::classification::histogram::operators::TreeWithHistograms;
-use models::decision_tree::classification::histogram::HFloat;
-use models::decision_tree::classification::histogram::Histogram;
+use models::decision_tree::split_improvement::SplitImprovement;
+use models::decision_tree::classification::histogram::{
+    collection::HistogramCollection, operators::TreeWithHistograms, HFloat, Histogram,
+};
 use models::decision_tree::tree::DecisionTree;
 use num_traits::Float;
 use timely::dataflow::channels::pact::Pipeline;
@@ -12,16 +13,12 @@ use timely::progress::Timestamp;
 use timely::Data;
 
 /// Operator that splits the unlabeled leaf nodes in a decision tree according to Histogram data
-pub trait SplitLeaves<T: Float, L, S: Scope> {
+pub trait SplitLeaves<T: Float, L, S: Scope, I: SplitImprovement<T, L>> {
     /// Split all unlabeled leaves where a split would improve the classification accuracy
     /// if the innermost `time` exceeds the given maximum `levels`, the operator will stop
     /// splitting and instead only label the remaining leaf nodes with the most commonly
     /// occuring labels that reach the node.
-    fn split_leaves<I: Impurity<T, L>>(
-        &self,
-        levels: u64,
-        bins: u64,
-    ) -> Stream<S, (usize, DecisionTree<T, L>)>;
+    fn split_leaves(&self, levels: u64, bins: u64) -> Stream<S, (usize, DecisionTree<T, L>)>;
 }
 
 impl<
@@ -29,13 +26,10 @@ impl<
         Ts1: Timestamp,
         T: HFloat + Data,
         L: Data + Copy + PartialEq + Debug,
-    > SplitLeaves<T, L, S> for Stream<S, TreeWithHistograms<T, L>>
+        I: SplitImprovement<T, L, HistogramData = HistogramCollection<T, L>>,
+    > SplitLeaves<T, L, S, I> for Stream<S, TreeWithHistograms<T, L>>
 {
-    fn split_leaves<I: Impurity<T, L>>(
-        &self,
-        levels: u64,
-        bins: u64,
-    ) -> Stream<S, (usize, DecisionTree<T, L>)> {
+    fn split_leaves(&self, levels: u64, bins: u64) -> Stream<S, (usize, DecisionTree<T, L>)> {
         self.unary(Pipeline, "BuildTree", |_| {
             move |input, output| {
                 input.for_each(move |time, data| {
@@ -69,7 +63,7 @@ impl<
                                                 .iter()
                                                 .map(|candidate_split| {
                                                     let delta =
-                                                        I::impurity_delta(
+                                                        I::split_improvement(
                                                             &histograms,
                                                             leaf,
                                                             attr,

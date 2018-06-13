@@ -1,12 +1,12 @@
-use super::impurity::*;
 use super::SegmentTrainingData;
 use data::dataflow::{Branch, ExchangeEvenly};
 use data::serialization::*;
 use data::TrainingData;
 use fnv::FnvHashMap;
+use models::decision_tree::split_improvement::SplitImprovement;
 use models::decision_tree::classification::{
-    histogram::operators::{CreateHistograms, AggregateHistograms},
-    histogram::HFloat,
+    histogram::collection::HistogramCollection,
+    histogram::operators::{AggregateHistograms, CreateHistograms}, histogram::HFloat,
     split_leaves::SplitLeaves,
 };
 use models::decision_tree::tree::DecisionTree;
@@ -22,7 +22,7 @@ use timely::ExchangeData;
 use Result;
 
 /// Supervised model that builds a classification tree from streaming data
-pub struct StreamingClassificationTree<I: Impurity<T, L>, T: Float, L> {
+pub struct StreamingClassificationTree<I: SplitImprovement<T, L>, T: Float, L> {
     levels: u64,
     points_per_worker: u64,
     bins: usize,
@@ -31,7 +31,7 @@ pub struct StreamingClassificationTree<I: Impurity<T, L>, T: Float, L> {
     _l: PhantomData<L>,
 }
 
-impl<I: Impurity<T, L>, T: Float, L> StreamingClassificationTree<I, T, L> {
+impl<I: SplitImprovement<T, L>, T: Float, L> StreamingClassificationTree<I, T, L> {
     /// Creates a new model instance
     pub fn new(levels: u64, points_per_worker: u64, bins: usize) -> Self {
         StreamingClassificationTree {
@@ -45,7 +45,7 @@ impl<I: Impurity<T, L>, T: Float, L> StreamingClassificationTree<I, T, L> {
     }
 }
 
-impl<T, L, I: Impurity<T, L>>
+impl<T, L, I>
     StreamingSupModel<
         TrainingData<T, L>,
         AbomonableArray2<T>,
@@ -55,6 +55,7 @@ impl<T, L, I: Impurity<T, L>>
 where
     T: ExchangeData + HFloat + Debug,
     L: Debug + ExchangeData + Into<usize> + Copy + Eq + Hash + 'static,
+    I: SplitImprovement<T, L, HistogramData = HistogramCollection<T, L>>,
 {
     /// Predict output from inputs. Waits until a decision tree has been received before processing
     /// any data coming in on the stream of samples. When a tree has been received, all sample data
@@ -127,7 +128,7 @@ where
                     };
 
                     let (loop_handle, cycle) = tree_iter_scope.loop_variable(self.levels, 1);
-                    let (iterate, finished_tree) = init_tree
+                    let histograms_and_trees = init_tree
                         .to_stream(tree_iter_scope)
                         .concat(&cycle)
                         .inspect(|x| info!("Begin tree iteration: {:?}", x))
@@ -137,12 +138,16 @@ where
                             self.bins,
                             self.points_per_worker as usize,
                         )
-                        .aggregate_histograms()
-                        .split_leaves::<I>(self.levels, self.bins as u64)
-                        .map(move |(split_leaves, tree)| {
-                            info!("Split {} leaves", split_leaves);
-                            tree
-                        })
+                        .aggregate_histograms();
+
+                    let (iterate, finished_tree) = SplitLeaves::<_, _, _, I>::split_leaves(
+                        &histograms_and_trees,
+                        self.levels,
+                        self.bins as u64,
+                    ).map(move |(split_leaves, tree)| {
+                        info!("Split {} leaves", split_leaves);
+                        tree
+                    })
                         .branch(move |time, _| time.inner >= levels);
                     iterate.connect_loop(loop_handle);
                     finished_tree.leave()

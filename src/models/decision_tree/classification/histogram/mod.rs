@@ -68,6 +68,7 @@ impl<T: HFloat> Histogram<T> {
         let bins = &mut self.data;
         let other_bins = &other.data;
         bins.extend(other_bins);
+        bins.sort_unstable();
 
         while bins.len() > self.bins {
             let least_diff = bins.iter()
@@ -83,7 +84,6 @@ impl<T: HFloat> Histogram<T> {
             bins.remove(least_diff + 1);
         }
 
-        bins.sort_unstable();
         let mut i = 0;
         while i + 1 < bins.len() {
             if bins[i].p.ulps_eq(&bins[i + 1].p, T::default_epsilon(), 2) {

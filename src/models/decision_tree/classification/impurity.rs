@@ -1,26 +1,13 @@
-use num_traits::Float;
-use models::decision_tree::classification::histogram::HFloat;
-use models::decision_tree::classification::histogram::HistogramCollection;
+use models::decision_tree::classification::histogram::{HFloat, HistogramCollection};
 use models::decision_tree::tree::NodeIndex;
-
-pub trait Impurity<T: Float, L> {
-    /// Calculates how much the impurity in the tree would be reduced if
-    /// it was split at the given node, attribute and split point. The `HistogramCollection`
-    /// is expected to contain all histograms for each attribute and label at this node.
-    fn impurity_delta(
-        histograms: &HistogramCollection<T, L>,
-        node: NodeIndex,
-        attribute: usize,
-        split_at: T,
-    ) -> Option<T>
-    where
-        L: Copy + PartialEq + ::std::fmt::Debug;
-}
+use models::decision_tree::split_improvement::SplitImprovement;
 
 pub struct Gini;
 
-impl<T: HFloat, L> Impurity<T, L> for Gini {
-    fn impurity_delta(
+impl<T: HFloat, L> SplitImprovement<T, L> for Gini {
+    type HistogramData = HistogramCollection<T, L>;
+
+    fn split_improvement(
         histograms: &HistogramCollection<T, L>,
         node_index: NodeIndex,
         attribute: usize,
