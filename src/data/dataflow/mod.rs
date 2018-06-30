@@ -1,15 +1,23 @@
 //! Extension traits and other tools to deal with dataflow Streams.
 
+use data::TrainingData;
+use fnv::FnvHashMap;
 use std::sync::mpsc;
+use timely::dataflow::channels::pact::Pipeline;
 use timely::dataflow::operators::capture::Event;
+use timely::dataflow::operators::*;
+use timely::dataflow::{Scope, Stream};
+use timely::progress::nested::product::Product;
+use timely::progress::Timestamp;
+use timely::Data;
 use Result;
 
-mod random;
-mod exchange_evenly;
 mod branch;
+mod exchange_evenly;
+mod random;
 
-pub use self::exchange_evenly::ExchangeEvenly;
 pub use self::branch::{Branch, BranchWhen};
+pub use self::exchange_evenly::ExchangeEvenly;
 
 /// A container for result data coming in asynchronously from somewhere. Internally uses the `std::sync::mpsc`
 /// channels for receiving the data.
@@ -104,5 +112,43 @@ impl<T: Ord, D> ExtractUnordered<T, D> for ::std::sync::mpsc::Receiver<Event<T, 
 
         result.retain(|x| !x.1.is_empty());
         result
+    }
+}
+
+/// Extension trait for a stream of `TrainingData<T, L>`
+pub trait SegmentTrainingData<S: Scope, T: Data, L: Data> {
+    /// Segments training data that comes in on one timestamp into a maximum of
+    /// `items_per_segment` items. This is used so that on a continuous stream of
+    /// data, trees can be created with reasonably sized chunks of data.
+    /// Expects the scope where the operator is used to have a Product(Timestamp, u64)
+    /// timestamp, where the inner timestamp will be used to indicate the segment number
+    /// of data
+    fn segment_training_data(&self, items_per_segment: u64) -> Stream<S, TrainingData<T, L>>;
+}
+
+impl<S: Scope<Timestamp = Product<Ts, u64>>, Ts: Timestamp, T: Data, L: Data>
+    SegmentTrainingData<S, T, L> for Stream<S, TrainingData<T, L>>
+{
+    fn segment_training_data(&self, items_per_segment: u64) -> Stream<S, TrainingData<T, L>> {
+        self.unary_frontier(Pipeline, "SegmentTrainingData", |_, _| {
+            let mut stash: FnvHashMap<_, (Product<_, u64>, u64)> = FnvHashMap::default();
+
+            move |input, output| {
+                input.for_each(|cap, data| {
+                    let time = stash
+                        .entry(cap.clone())
+                        .or_insert_with(|| (cap.time().clone(), 0));
+                    for training_data in data.iter() {
+                        time.1 += training_data.x().rows() as u64;
+                        if time.1 > items_per_segment {
+                            time.0.inner += 1;
+                        }
+                    }
+                    output.session(&cap.delayed(&time.0)).give_content(data);
+                });
+
+                stash.retain(|time, _| !input.frontier().less_equal(time));
+            }
+        })
     }
 }

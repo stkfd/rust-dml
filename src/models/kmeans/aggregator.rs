@@ -9,7 +9,7 @@ use num_traits::cast::FromPrimitive;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::ops::{AddAssign, DivAssign};
-use timely::dataflow::{channels::pact::Pipeline, operators::Unary, Scope, Stream};
+use timely::dataflow::{channels::pact::Pipeline, operators::generic::Operator, Scope, Stream};
 use timely::Data;
 
 #[derive(Clone, Debug)]
@@ -161,7 +161,7 @@ impl<S: Scope, D: Scalar + AddAssign<D> + Data + Debug> AccumulateStatistics<S, 
                     for incoming in data.drain(..) {
                         agg += &<AggregationStatistics<D>>::from(incoming);
                     }
-                    notificator.notify_at(time);
+                    notificator.notify_at(time.retain());
                 });
 
                 notificator.for_each(|time, _, _| {

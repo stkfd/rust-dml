@@ -2,14 +2,11 @@ use data::dataflow::{Branch, ExchangeEvenly, SegmentTrainingData};
 use data::serialization::*;
 use data::TrainingData;
 use fnv::FnvHashMap;
-use models::decision_tree::classification::{histogram::collection::HistogramCollection,
-                                            histogram::operators::{AggregateHistograms},
-                                            histogram::HFloat};
-use models::decision_tree::split_improvement::SplitImprovement;
-use models::decision_tree::tree::DecisionTree;
-use models::decision_tree::operators::*;
+use models::decision_tree::histogram_generics::{ContinuousValue, DiscreteValue};
+use models::decision_tree::operators::{AggregateHistograms, CreateHistograms, SplitLeaves};
+use models::decision_tree::regression::histogram::TargetValueHistogramSet;
+use models::decision_tree::{split_improvement::SplitImprovement, tree::DecisionTree};
 use models::StreamingSupModel;
-use num_traits::Float;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::marker::PhantomData;
@@ -19,8 +16,7 @@ use timely::dataflow::{Scope, Stream};
 use timely::ExchangeData;
 use Result;
 
-/// Supervised model that builds a classification tree from streaming data
-pub struct StreamingClassificationTree<I: SplitImprovement<T, L>, T: Float, L> {
+pub struct StreamingRegressionTree<I: SplitImprovement<T, L>, T, L> {
     levels: u64,
     points_per_worker: u64,
     bins: usize,
@@ -29,10 +25,10 @@ pub struct StreamingClassificationTree<I: SplitImprovement<T, L>, T: Float, L> {
     _l: PhantomData<L>,
 }
 
-impl<I: SplitImprovement<T, L>, T: Float, L> StreamingClassificationTree<I, T, L> {
+impl<I: SplitImprovement<T, L>, T: Hash + Eq + PartialOrd, L> StreamingRegressionTree<I, T, L> {
     /// Creates a new model instance
     pub fn new(levels: u64, points_per_worker: u64, bins: usize) -> Self {
-        StreamingClassificationTree {
+        StreamingRegressionTree {
             levels,
             points_per_worker,
             bins,
@@ -49,11 +45,11 @@ impl<T, L, I>
         AbomonableArray2<T>,
         AbomonableArray1<L>,
         DecisionTree<T, L>,
-    > for StreamingClassificationTree<I, T, L>
+    > for StreamingRegressionTree<I, T, L>
 where
-    T: ExchangeData + HFloat + Debug,
-    L: Debug + ExchangeData + Into<usize> + Copy + Eq + Hash + 'static,
-    I: SplitImprovement<T, L, HistogramData = HistogramCollection<T, L>>,
+    T: DiscreteValue + Debug + ExchangeData,
+    L: ContinuousValue + Debug + ExchangeData,
+    I: SplitImprovement<T, L, HistogramData = TargetValueHistogramSet<T, L>>,
 {
     /// Predict output from inputs. Waits until a decision tree has been received before processing
     /// any data coming in on the stream of samples. When a tree has been received, all sample data
@@ -112,7 +108,8 @@ where
         let levels = self.levels;
 
         let results = scope.scoped::<u64, _, _>(|data_segments_scope| {
-            let training_data = data.enter(data_segments_scope)
+            let training_data = data
+                .enter(data_segments_scope)
                 .segment_training_data(data_segments_scope.peers() as u64 * self.points_per_worker)
                 .exchange_evenly();
 

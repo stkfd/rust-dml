@@ -1,25 +1,16 @@
-use super::*;
+use models::decision_tree::operators::SplitLeaves;
+use std::fmt::Debug;
 use models::decision_tree::split_improvement::SplitImprovement;
 use models::decision_tree::classification::histogram::{
     collection::HistogramCollection, operators::TreeWithHistograms, HFloat, Histogram,
 };
-use models::decision_tree::tree::DecisionTree;
-use num_traits::Float;
+use models::decision_tree::tree::{DecisionTree, Rule};
 use timely::dataflow::channels::pact::Pipeline;
 use timely::dataflow::operators::Operator;
 use timely::dataflow::{Scope, Stream};
 use timely::progress::nested::product::Product;
 use timely::progress::Timestamp;
 use timely::Data;
-
-/// Operator that splits the unlabeled leaf nodes in a decision tree according to Histogram data
-pub trait SplitLeaves<T: Float, L, S: Scope, I: SplitImprovement<T, L>> {
-    /// Split all unlabeled leaves where a split would improve the classification accuracy
-    /// if the innermost `time` exceeds the given maximum `levels`, the operator will stop
-    /// splitting and instead only label the remaining leaf nodes with the most commonly
-    /// occuring labels that reach the node.
-    fn split_leaves(&self, levels: u64, bins: u64) -> Stream<S, (usize, DecisionTree<T, L>)>;
-}
 
 impl<
         S: Scope<Timestamp = Product<Ts1, u64>>,
@@ -30,7 +21,7 @@ impl<
     > SplitLeaves<T, L, S, I> for Stream<S, TreeWithHistograms<T, L>>
 {
     fn split_leaves(&self, levels: u64, bins: u64) -> Stream<S, (usize, DecisionTree<T, L>)> {
-        self.unary(Pipeline, "BuildTree", |_| {
+        self.unary(Pipeline, "BuildTree", |_, _| {
             move |input, output| {
                 input.for_each(move |time, data| {
                     for (mut tree, histograms, n_attributes) in data.drain(..) {
@@ -99,7 +90,7 @@ impl<
 
                                         tree.split(
                                             leaf,
-                                            Rule::new(split_attr, split_location),
+                                            Rule::threshold(split_attr, split_location),
                                             label,
                                         );
                                         split_leaves += 1;

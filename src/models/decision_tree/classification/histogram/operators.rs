@@ -1,3 +1,4 @@
+use models::decision_tree::operators::CreateHistograms;
 use super::*;
 use super::collection::HistogramCollection;
 use fnv::FnvHashMap;
@@ -19,25 +20,12 @@ use timely::{Data, ExchangeData};
 /// this number.
 pub type TreeWithHistograms<T, L> = (DecisionTree<T, L>, HistogramCollection<T, L>, usize);
 
-/// Extension trait for timely `Stream`
-pub trait CreateHistograms<S: Scope, T: Data + Float, L: Data> {
-    /// Takes a set of `TrainingData` and a stream of decision trees (as they are created).
-    /// For each decision tree, compiles a set of histograms describing the samples which
-    /// arrive at each unlabeled leaf node in the tree.
-    fn create_histograms(
-        &self,
-        training_data: &Stream<S, TrainingData<T, L>>,
-        bins: usize,
-        data_cache_size: usize,
-    ) -> Stream<S, TreeWithHistograms<T, L>>;
-}
-
 impl<
         S: Scope<Timestamp = Product<TsOuter, u64>>,
         TsOuter: Timestamp,
         T: HFloat + Data,
         L: Data + Into<usize> + Copy + PartialEq,
-    > CreateHistograms<S, T, L> for Stream<S, DecisionTree<T, L>>
+    > CreateHistograms<S, T, L, TreeWithHistograms<T, L>> for Stream<S, DecisionTree<T, L>>
 {
     fn create_histograms(
         &self,
@@ -51,7 +39,7 @@ impl<
             Pipeline,
             Pipeline,
             "CreateHistograms",
-            |_| {
+            |_, _| {
                 let mut data_stash = FnvHashMap::default();
                 let mut tree_stash = FnvHashMap::default();
                 let mut n_attributes = None;
@@ -89,6 +77,7 @@ impl<
                     });
 
                     in_tree.for_each(|time, trees| {
+                        let time = time.retain();
                         debug!(
                             "Worker {} received temporary tree at {:?}",
                             worker,

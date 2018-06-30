@@ -247,7 +247,7 @@ where
         points_stream: &Stream<S, (IntSliceIndex<usize>, AbomonableArray2<D>)>,
     ) -> Stream<S, AbomonableAggregationStatistics<D>> {
         let worker_index = self.scope().index();
-        self.binary_frontier(&points_stream, Pipeline, Pipeline, "AssignPoints", |_| {
+        self.binary_frontier(&points_stream, Pipeline, Pipeline, "AssignPoints", |_, _| {
             let mut point_stash = Vec::new();
             let mut centroid_stash = HashMap::new();
 
@@ -258,7 +258,7 @@ where
                         worker_index,
                         data.len()
                     );
-                    let entry = centroid_stash.entry(time.clone()).or_insert_with(Vec::new);
+                    let entry = centroid_stash.entry(time.retain()).or_insert_with(Vec::new);
                     entry.extend(data.drain(..));
                 });
 
@@ -323,12 +323,13 @@ impl<S: Scope<Timestamp = Product<T, usize>>, T: Timestamp, D: Data + Display> E
         Stream<S, AbomonableArray2<D>>,
     ) {
         let worker = self.scope().index();
-        let mut outputs = self.unary_frontier(Pipeline, "CheckConvergence", |_| {
+        let mut outputs = self.unary_frontier(Pipeline, "CheckConvergence", |_, _| {
             let mut iteration_count = 0;
             let mut centroid_stash: HashMap<_, AbomonableArray2<D>> = HashMap::new();
 
             move |input, output| {
                 input.for_each(|cap, data| {
+                    let cap = cap.retain();
                     assert_eq!(data.len(), 1);
 
                     for new_centroids in data.drain(..) {

@@ -1,9 +1,8 @@
 //! A trait for measurements of how good a split of a node with a specific condition would be
 
-use num_traits::Float;
 use models::decision_tree::tree::NodeIndex;
 
-pub trait SplitImprovement<T: Float, L> {
+pub trait SplitImprovement<T, L> {
     type HistogramData;
 
     /// Calculates how much the impurity in the tree would be reduced if

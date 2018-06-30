@@ -13,7 +13,7 @@ pub trait ExchangeEvenly<S: Scope, D: ExchangeData> {
 impl<S: Scope, D: ExchangeData> ExchangeEvenly<S, D> for Stream<S, D> {
     fn exchange_evenly(&self) -> Stream<S, D> {
         let peers = self.scope().peers() as u64;
-        self.unary(Pipeline, "ExchangeEvenly", |_| {
+        self.unary(Pipeline, "ExchangeEvenly", |_, _| {
             let mut count = 0_u64;
             move |input, output| {
                 input.for_each(|time, data| {

@@ -124,6 +124,7 @@ where
 
     /// Get the most frequently occuring label at the given node
     pub fn get_node_label(&self, node: NodeIndex) -> Option<L> {
+        // FIXME: should merge all histograms for the node first
         let histograms = &self.get_by_node(node)?.get(0)?;
 
         histograms

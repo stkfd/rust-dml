@@ -1,4 +1,4 @@
-#![feature(try_from, associated_type_defaults, specialization, map_entry_replace, generic_associated_types)]
+#![feature(try_from)]
 
 extern crate abomonation;
 #[macro_use]
@@ -23,6 +23,8 @@ extern crate rand;
 #[cfg_attr(test, macro_use)]
 extern crate approx;
 extern crate fnv;
+extern crate ordered_float;
+extern crate vec_map;
 
 use std::result::Result as StdResult;
 

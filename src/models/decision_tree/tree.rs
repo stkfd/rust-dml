@@ -143,7 +143,7 @@ impl<T, L> IndexMut<NodeIndex> for DecisionTree<T, L> {
     }
 }
 
-#[derive(Hash, Abomonation, Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Hash, Abomonation, Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd)]
 pub struct NodeIndex(usize);
 
 impl NodeIndex {
@@ -168,22 +168,56 @@ pub enum Node<T, L> {
 #[derive(Abomonation, Debug, Clone, Eq, PartialEq, Hash)]
 pub struct Rule<T> {
     feature: usize,
-    threshold: T,
+    inner: InnerRule<T>,
 }
 
-impl<T> Rule<T> {
-    pub fn new(feature: usize, threshold: T) -> Self {
-        Rule { feature, threshold }
+#[derive(Abomonation, Clone, Debug, Eq, PartialEq, Hash)]
+pub enum InnerRule<T> {
+    Threshold(T),
+    Subset(Vec<T>),
+}
+
+impl<T: PartialOrd> Rule<T> {
+    pub fn threshold(feature: usize, threshold: T) -> Self {
+        Rule { feature, inner: InnerRule::Threshold(threshold) }
     }
+
+    pub fn subset(feature: usize, subset: Vec<T>) -> Self {
+        Rule { feature, inner: InnerRule::Subset(subset) }
+    }
+
+    pub fn match_value(&self, value: &T) -> Option<MatchResult> {
+        match self.inner {
+            InnerRule::Threshold(ref threshold) => {
+                match value.partial_cmp(threshold) {
+                    Some(Ordering::Less) => Some(MatchResult::Left),
+                    Some(Ordering::Greater) | Some(Ordering::Equal) => Some(MatchResult::Right),
+                    None => None,
+                }
+            },
+            InnerRule::Subset(ref subset) => {
+                if subset.contains(value) {
+                    Some(MatchResult::Left)
+                } else {
+                    Some(MatchResult::Right)
+                }
+            }
+        }
+    }
+}
+
+pub enum MatchResult {
+    Left,
+    Right,
 }
 
 impl<T: PartialOrd, L> Node<T, L> {
     pub fn descend(&self, value: &ArrayView1<T>) -> Option<NodeIndex> {
         match *self {
             Node::Inner { ref rule, l, r, .. } => {
-                match value[rule.feature].partial_cmp(&rule.threshold) {
-                    Some(Ordering::Less) => Some(l),
-                    Some(Ordering::Greater) | Some(Ordering::Equal) => Some(r),
+                match rule.match_value(&value[rule.feature]) {
+                    Some(MatchResult::Left) => Some(l),
+                    Some(MatchResult::Right) => Some(r),
                     None => None,
                 }
             }
@@ -206,26 +240,17 @@ mod test {
         let root = tree.root();
         let (not_red, red) = tree.split(
             root,
-            Rule {
-                feature: 0,
-                threshold: 1,
-            },
+            Rule::threshold(0, 1),
             None
         );
         let (red_and_not_green, red_green) = tree.split(
             red,
-            Rule {
-                feature: 1,
-                threshold: 1,
-            },
+            Rule::threshold(1, 1),
             None
         );
         let (pure_red, _) = tree.split(
             red_and_not_green,
-            Rule {
-                feature: 2,
-                threshold: 1,
-            },
+            Rule::threshold(2, 1),
             None
         );
         tree.label(pure_red, "Pure Red");
