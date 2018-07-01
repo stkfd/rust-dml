@@ -62,27 +62,27 @@ where
                             time.time()
                         );
 
-                        let (cached_samples, current_index, sample_cache) = data_stash
+                        let (cached_sample_count, current_index, sample_cache) = data_stash
                             .entry(time.retain().outer.clone())
                             .or_insert_with(|| (0_usize, 0_usize, Vec::new()));
 
                         for datum in data.drain(..) {
                             let cols = datum.x().cols();
                             if *current_index >= sample_cache.len() {
-                                if *cached_samples < data_cache_size {
+                                if *cached_sample_count < data_cache_size {
                                     sample_cache.push(datum);
                                     *current_index += 1;
                                 } else {
-                                    *cached_samples -= sample_cache[0].x().cols();
+                                    *cached_sample_count -= sample_cache[0].x().cols();
                                     sample_cache[0] = datum;
                                     *current_index = 1;
                                 }
                             } else {
-                                *cached_samples -= sample_cache[*current_index].x().cols();
+                                *cached_sample_count -= sample_cache[*current_index].x().cols();
                                 sample_cache[*current_index] = datum;
                                 *current_index += 1;
                             }
-                            *cached_samples += cols;
+                            *cached_sample_count += cols;
                         }
                     });
 

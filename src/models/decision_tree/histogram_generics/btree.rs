@@ -93,12 +93,7 @@ where
     }
 
     fn get_or_insert_with(&mut self, key: &K, insert_fn: impl Fn() -> H) -> &mut H {
-        if let Some(h) = self.histograms.get_mut(key) {
-            h
-        } else {
-            self.histograms.insert(key.clone(), insert_fn());
-            self.histograms.get_mut(key).unwrap()
-        }
+        self.histograms.entry(key.clone()).or_insert_with(insert_fn)
     }
 
     fn select<'a>(
