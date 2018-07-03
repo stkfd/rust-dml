@@ -9,6 +9,7 @@ pub trait SplitImprovement<T, L> {
     /// it was split at the given node, attribute and split point. The `HistogramCollection`
     /// is expected to contain all histograms for each attribute and label at this node.
     fn split_improvement(
+        &self,
         histogram_data: &Self::HistogramData,
         node: NodeIndex,
         attribute: usize,

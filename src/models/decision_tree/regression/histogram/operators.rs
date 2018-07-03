@@ -2,7 +2,7 @@ use data::serialization::Serializable;
 use data::TrainingData;
 use fnv::FnvHashMap;
 use models::decision_tree::histogram_generics::{
-    BaseHistogram, ContinuousValue, DiscreteValue, HistogramSet, HistogramSetItem
+    BaseHistogram, ContinuousValue, DiscreteValue, HistogramSet, HistogramSetItem,
 };
 use models::decision_tree::operators::*;
 use models::decision_tree::regression::histogram::TargetValueHistogramSet;
@@ -55,15 +55,16 @@ where
                 let mut n_attributes = None;
 
                 move |in_tree, in_data, out| {
-                    in_data.for_each(|time, data| {
+                    in_data.for_each(|cap, data| {
+                        let outer_time = cap.time().outer.clone();
+
                         debug!(
                             "Worker {} received training data at {:?}",
-                            worker,
-                            time.time()
+                            worker, outer_time
                         );
 
                         let (cached_sample_count, current_index, sample_cache) = data_stash
-                            .entry(time.retain().outer.clone())
+                            .entry(outer_time)
                             .or_insert_with(|| (0_usize, 0_usize, Vec::new()));
 
                         for datum in data.drain(..) {
@@ -97,18 +98,18 @@ where
                             panic!("Received more than one tree for a time")
                         }
                         let tree = trees.drain(..).next().unwrap();
-                        tree_stash.insert(time, tree);
+                        tree_stash.insert(time, Some(tree));
                     });
 
                     let frontiers = [in_data.frontier(), in_tree.frontier()];
-                    for (time, tree) in &tree_stash {
+                    for (time, tree_opt) in &mut tree_stash {
                         // received the decision tree for this time
                         if frontiers.iter().all(|f| !f.less_equal(&time)) {
+                            let tree = tree_opt.take().unwrap();
                             debug!("Worker {} collecting histograms", worker);
-                            debug!("{:?}", data_stash.keys());
                             let (_, _, data) = data_stash.get(&time.outer).expect("Retrieve data");
-                            //let tree = tree_stash.remove(time).expect("Retrieve decision tree");
-                            let mut histograms = None;
+
+                            let mut histograms = TargetValueHistogramSet::<T, L>::default();
 
                             for training_data in data {
                                 let x = training_data.x();
@@ -119,46 +120,40 @@ where
                                     assert_eq!(n_attributes, x.cols());
                                 } else {
                                     // initialize histogram set once the number of columns is known
-                                    histograms = Some(TargetValueHistogramSet::<T, L>::default());
                                     n_attributes = Some(x.cols());
                                 }
 
-                                match &mut histograms {
-                                    Some(histograms) => {
-                                        for (x_row, y_i) in x.outer_iter().zip(y.iter()) {
-                                            let node_index = tree
-                                                .descend_iter(x_row)
-                                                .last()
-                                                .expect("Navigate to leaf node");
-                                            if let Node::Leaf { label: None } = tree[node_index] {
-                                                let node_histograms = histograms
-                                                    .get_or_insert_with(&node_index, Default::default);
-                                                for (i_attr, x_i) in x_row.iter().enumerate() {
-                                                    node_histograms
-                                                        .get_or_insert_with(&i_attr, Default::default)
-                                                        .get_or_insert_with(x_i, || BaseHistogram::new(bins))
-                                                        .insert(*y_i);
-                                                }
-                                            }
+                                for (x_row, y_i) in x.outer_iter().zip(y.iter()) {
+                                    let node_index = tree
+                                        .descend_iter(x_row)
+                                        .last()
+                                        .expect("Navigate to leaf node");
+                                    if let Node::Leaf { label: None } = tree[node_index] {
+                                        let node_histograms = histograms
+                                            .get_or_insert_with(&node_index, Default::default);
+                                        for (i_attr, x_i) in x_row.iter().enumerate() {
+                                            node_histograms
+                                                .get_or_insert_with(&i_attr, Default::default)
+                                                .get_or_insert_with(x_i, || {
+                                                    BaseHistogram::new(bins)
+                                                })
+                                                .insert(*y_i);
                                         }
                                     }
-                                    _ => unreachable!(),
                                 }
                             }
 
-                            histograms.map(|h| {
-                                out.session(&time)
-                                    .give((tree.clone(), h.into_serializable()));
-                            });
+                            out.session(&time)
+                                .give((tree.clone(), histograms.into_serializable()));
                         }
                     }
 
-                    tree_stash.retain(|time, _| !frontiers.iter().all(|f| !f.less_equal(time.time())));
                     data_stash.retain(|time, _| {
                         !frontiers
                             .iter()
                             .all(|f| !f.less_equal(&Product::new(time.clone(), <u64>::max_value())))
                     });
+                    tree_stash.retain(|_time, tree_opt| tree_opt.is_some());
                 }
             },
         )
@@ -186,6 +181,7 @@ impl<S, T, L> AggregateHistograms<S, T, L>
             <TargetValueHistogramSet<T, L> as Serializable>::Serializable,
         ),
     > {
+        let worker = self.scope().index();
         self.exchange(|_| 0_u64)
             .unary_frontier(Pipeline, "MergeHistogramSets", |_, _| {
                 let mut stash: FnvHashMap<
@@ -195,6 +191,7 @@ impl<S, T, L> AggregateHistograms<S, T, L>
                 move |input, output| {
                     // receive and merge incoming histograms
                     input.for_each(|time, data| {
+                        debug!("Receiving histograms for merging");
                         let opt_entry = stash.entry(time.retain()).or_insert_with(|| {
                             let (tree, f_hist) = data.pop().expect("First tree/histogram set");
                             Some((tree, Serializable::from_serializable(f_hist)))
@@ -213,6 +210,11 @@ impl<S, T, L> AggregateHistograms<S, T, L>
                     for (time, stash_entry) in &mut stash {
                         // send out merged histograms at the end of each timestamp
                         if !input.frontier().less_equal(time) {
+                            debug!(
+                                "Sending merged histograms for timestamp {:?} on worker {}",
+                                time.time(),
+                                worker
+                            );
                             let (tree, merged_set) = stash_entry.take().unwrap();
                             output
                                 .session(&time)

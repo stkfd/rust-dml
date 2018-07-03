@@ -2,12 +2,13 @@ use data::dataflow::{Branch, ExchangeEvenly, SegmentTrainingData};
 use data::serialization::*;
 use data::TrainingData;
 use fnv::FnvHashMap;
-use models::decision_tree::classification::{histogram::collection::HistogramCollection,
-                                            histogram::operators::{AggregateHistograms},
-                                            histogram::HFloat};
+use models::decision_tree::classification::{
+    histogram::collection::HistogramCollection, histogram::operators::AggregateHistograms,
+    histogram::HFloat,
+};
+use models::decision_tree::operators::*;
 use models::decision_tree::split_improvement::SplitImprovement;
 use models::decision_tree::tree::DecisionTree;
-use models::decision_tree::operators::*;
 use models::StreamingSupModel;
 use num_traits::Float;
 use std::fmt::Debug;
@@ -24,19 +25,24 @@ pub struct StreamingClassificationTree<I: SplitImprovement<T, L>, T: Float, L> {
     levels: u64,
     points_per_worker: u64,
     bins: usize,
-    _impurity_algo: PhantomData<I>,
+    impurity_algo: I,
     _t: PhantomData<T>,
     _l: PhantomData<L>,
 }
 
-impl<I: SplitImprovement<T, L>, T: Float, L> StreamingClassificationTree<I, T, L> {
+impl<I, T, L> StreamingClassificationTree<I, T, L>
+where
+    T: ExchangeData + HFloat + Debug,
+    L: Debug + ExchangeData + Into<usize> + Copy + Eq + Hash + 'static,
+    I: SplitImprovement<T, L, HistogramData = HistogramCollection<T, L>> + 'static + Clone,
+{
     /// Creates a new model instance
-    pub fn new(levels: u64, points_per_worker: u64, bins: usize) -> Self {
+    pub fn new(levels: u64, points_per_worker: u64, bins: usize, impurity_algo: I) -> Self {
         StreamingClassificationTree {
             levels,
             points_per_worker,
             bins,
-            _impurity_algo: PhantomData,
+            impurity_algo,
             _t: PhantomData,
             _l: PhantomData,
         }
@@ -53,7 +59,7 @@ impl<T, L, I>
 where
     T: ExchangeData + HFloat + Debug,
     L: Debug + ExchangeData + Into<usize> + Copy + Eq + Hash + 'static,
-    I: SplitImprovement<T, L, HistogramData = HistogramCollection<T, L>>,
+    I: SplitImprovement<T, L, HistogramData = HistogramCollection<T, L>> + 'static + Clone,
 {
     /// Predict output from inputs. Waits until a decision tree has been received before processing
     /// any data coming in on the stream of samples. When a tree has been received, all sample data
@@ -63,43 +69,44 @@ where
         training_results: Stream<S, DecisionTree<T, L>>,
         inputs: Stream<S, AbomonableArray2<T>>,
     ) -> Result<Stream<S, AbomonableArray1<L>>> {
-        let predictions = training_results.binary(&inputs, Pipeline, Pipeline, "Predict", |_, _| {
-            let mut current_tree = None;
-            let mut input_stash = FnvHashMap::default();
+        let predictions =
+            training_results.binary(&inputs, Pipeline, Pipeline, "Predict", |_, _| {
+                let mut current_tree = None;
+                let mut input_stash = FnvHashMap::default();
 
-            move |trees, inputs, output| {
-                trees.for_each(|_, data| {
-                    current_tree = Some(data.drain(..).last().expect("Latest decision tree"));
-                });
-                inputs.for_each(|time, data| {
+                move |trees, inputs, output| {
+                    trees.for_each(|_, data| {
+                        current_tree = Some(data.drain(..).last().expect("Latest decision tree"));
+                    });
+                    inputs.for_each(|time, data| {
+                        if let Some(tree) = &current_tree {
+                            for samples in data.drain(..) {
+                                let samples = samples.view();
+                                output
+                                    .session(&time)
+                                    .give(AbomonableArray1::from(tree.predict_samples(samples)));
+                            }
+                        } else {
+                            input_stash
+                                .entry(time.retain())
+                                .or_insert_with(Vec::new)
+                                .extend(data.drain(..));
+                        }
+                    });
+
                     if let Some(tree) = &current_tree {
-                        for samples in data.drain(..) {
-                            let samples = samples.view();
-                            output
-                                .session(&time)
-                                .give(AbomonableArray1::from(tree.predict_samples(samples)));
-                        }
-                    } else {
-                        input_stash
-                            .entry(time.retain())
-                            .or_insert_with(Vec::new)
-                            .extend(data.drain(..));
-                    }
-                });
-
-                if let Some(tree) = &current_tree {
-                    for (time, data) in &mut input_stash {
-                        for samples in data.drain(..) {
-                            let samples = samples.view();
-                            output
-                                .session(&time)
-                                .give(AbomonableArray1::from(tree.predict_samples(samples)));
+                        for (time, data) in &mut input_stash {
+                            for samples in data.drain(..) {
+                                let samples = samples.view();
+                                output
+                                    .session(&time)
+                                    .give(AbomonableArray1::from(tree.predict_samples(samples)));
+                            }
                         }
                     }
+                    input_stash.retain(|_, data| !data.is_empty());
                 }
-                input_stash.retain(|_, data| !data.is_empty());
-            }
-        });
+            });
         Ok(predictions)
     }
 
@@ -112,7 +119,8 @@ where
         let levels = self.levels;
 
         let results = scope.scoped::<u64, _, _>(|data_segments_scope| {
-            let training_data = data.enter(data_segments_scope)
+            let training_data = data
+                .enter(data_segments_scope)
                 .segment_training_data(data_segments_scope.peers() as u64 * self.points_per_worker)
                 .exchange_evenly();
 
@@ -137,9 +145,10 @@ where
                         )
                         .aggregate_histograms();
 
-                    let (iterate, finished_tree) = SplitLeaves::<_, _, _, I>::split_leaves(
+                    let (iterate, finished_tree) = SplitLeaves::split_leaves(
                         &histograms_and_trees,
                         self.levels,
+                        self.impurity_algo.clone(),
                         self.bins as u64,
                     ).map(move |(split_leaves, tree)| {
                         info!("Split {} leaves", split_leaves);

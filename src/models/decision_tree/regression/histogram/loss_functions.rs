@@ -1,3 +1,4 @@
+use num_traits::Float;
 use models::decision_tree::histogram_generics::ContinuousValue;
 use models::decision_tree::regression::histogram::{Histogram, PartialBinSum};
 use models::decision_tree::histogram_generics::BaseHistogram;
@@ -10,6 +11,8 @@ impl<L: ContinuousValue> TrimmedLad<L> for Histogram<L> {
     fn trimmed_lad(&self, trim_ratio: L) -> L {
         let count_total = self.count();
         let count_total_f = L::from(count_total).unwrap();
+        
+        if count_total == 0 { return L::zero() }
 
         // calculate sample count thresholds for the relevant quantiles at 0.5, trim_ratio and 1 - trim_ratio
         let half_q_threshold = (count_total as f64 * 0.5).round() as u64;
@@ -71,17 +74,19 @@ impl<L: ContinuousValue> TrimmedLad<L> for Histogram<L> {
     }
 }
 
-pub trait WeightedLoss<L> {
-    fn weighted_loss(h_total: &Self, h_left: &Self, h_right: &Self) -> L;
+pub trait WeightedLoss<L: Float> {
+    fn weighted_loss(&self, h_total: &Histogram<L>, h_left: &Histogram<L>, h_right: &Histogram<L>) -> L;
 }
 
-impl<L: ContinuousValue> WeightedLoss<L> for Histogram<L> {
-    fn weighted_loss(h_total: &Histogram<L>, h_left: &Histogram<L>, h_right: &Histogram<L>) -> L {
-        let trim = L::from(0.1).unwrap();
-        let lad_l = h_left.trimmed_lad(trim);
+#[derive(Clone, Copy, Constructor)]
+pub struct TrimmedLadWeightedLoss<L>(pub L);
+
+impl<L: ContinuousValue> WeightedLoss<L> for TrimmedLadWeightedLoss<L> {
+    fn weighted_loss(&self, h_total: &Histogram<L>, h_left: &Histogram<L>, h_right: &Histogram<L>) -> L {
+        let lad_l = h_left.trimmed_lad(self.0);
         let count_l = L::from(h_left.count()).unwrap();
 
-        let lad_r = h_right.trimmed_lad(trim);
+        let lad_r = h_right.trimmed_lad(self.0);
         let count_r = L::from(h_right.count()).unwrap();
 
         let count_n = L::from(h_total.count()).unwrap();

@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use data::serialization::Serializable;
 use num_traits::Float;
 use std::hash::Hash;
@@ -66,14 +67,14 @@ pub trait BaseHistogram<T>: HistogramSetItem {
     fn count(&self) -> u64;
 
     /// Estimate the median value of the data points in this histogram
-    fn median(&self) -> T;
+    fn median(&self) -> Option<T>;
 }
 
-pub trait ContinuousValue: Float + Data {}
-impl<T: Float + Data> ContinuousValue for T {}
+pub trait ContinuousValue: Float + Data + Debug {}
+impl<T: Float + Data + Debug> ContinuousValue for T {}
 
-pub trait DiscreteValue: Ord + Eq + Hash + Copy + Data {}
-impl<T: Ord + Eq + Hash + Copy + Data> DiscreteValue for T {}
+pub trait DiscreteValue: Ord + Eq + Hash + Copy + Data + Debug {}
+impl<T: Ord + Eq + Hash + Copy + Data + Debug> DiscreteValue for T {}
 
 pub trait HistogramSetItem: Clone + Serializable {
     /// Merge another instance of this type into this histogram

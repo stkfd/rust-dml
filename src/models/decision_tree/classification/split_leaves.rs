@@ -17,12 +17,13 @@ impl<
         Ts1: Timestamp,
         T: HFloat + Data,
         L: Data + Copy + PartialEq + Debug,
-        I: SplitImprovement<T, L, HistogramData = HistogramCollection<T, L>>,
+        I: Clone + SplitImprovement<T, L, HistogramData = HistogramCollection<T, L>> + 'static,
     > SplitLeaves<T, L, S, I> for Stream<S, TreeWithHistograms<T, L>>
 {
-    fn split_leaves(&self, levels: u64, bins: u64) -> Stream<S, (usize, DecisionTree<T, L>)> {
+    fn split_leaves(&self, levels: u64, improvement_algo: I, bins: u64) -> Stream<S, (usize, DecisionTree<T, L>)> {
         self.unary(Pipeline, "BuildTree", |_, _| {
             move |input, output| {
+                let improvement_algo = improvement_algo.clone();
                 input.for_each(move |time, data| {
                     for (mut tree, histograms, n_attributes) in data.drain(..) {
                         let current_iteration = time.inner;
@@ -54,7 +55,7 @@ impl<
                                                 .iter()
                                                 .map(|candidate_split| {
                                                     let delta =
-                                                        I::split_improvement(
+                                                        improvement_algo.split_improvement(
                                                             &histograms,
                                                             leaf,
                                                             attr,

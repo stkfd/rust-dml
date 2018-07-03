@@ -11,21 +11,32 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 
-mod loss_functions;
+pub mod loss_functions;
 pub mod operators;
 
 pub type TargetValueHistogramSet<T, L> =
     BTreeHistogramSet<NodeIndex, BTreeHistogramSet<usize, FnvHistogramSet<T, Histogram<L>>>>;
 
-pub trait FindSplits<T> {
-    fn find_best_splits(&self, nodes: &[NodeIndex]) -> Vec<(NodeIndex, Rule<T>)>;
+pub trait FindSplits<T, L: Float, Lf: WeightedLoss<L>> {
+    fn find_best_splits(&self, nodes: &[NodeIndex], loss_func: &Lf) -> Vec<(NodeIndex, Rule<T>)>;
 }
 
-impl<T: DiscreteValue, L: ContinuousValue> FindSplits<T> for TargetValueHistogramSet<T, L> {
-    fn find_best_splits(&self, nodes: &[NodeIndex]) -> Vec<(NodeIndex, Rule<T>)> {
+impl<T: DiscreteValue, L: ContinuousValue, Lf: WeightedLoss<L>> FindSplits<T, L, Lf>
+    for TargetValueHistogramSet<T, L>
+{
+    fn find_best_splits(&self, nodes: &[NodeIndex], loss_func: &Lf) -> Vec<(NodeIndex, Rule<T>)> {
         nodes
             .iter()
-            .map(|n| (n, self.get(n).expect("Select leaf node for split finding")))
+            // retrieve histogram data for node
+            // if no histogram data for the node exists, it means no data samples were navigated to it
+            .filter_map(|n| {
+                let n_hist = self.get(n);
+                if n_hist.is_some() {
+                    Some((n, n_hist.unwrap()))
+                } else {
+                    None
+                }
+            })
             .map(|(node, node_histograms)| {
                 let (attr, x_subset, _loss) = node_histograms
                     .iter()
@@ -34,12 +45,14 @@ impl<T: DiscreteValue, L: ContinuousValue> FindSplits<T> for TargetValueHistogra
                         let mut sorted_feature_values = attr_histograms
                             .iter()
                             .map(|(x, histogram)| {
-                                (x, histogram, OrderedFloat::from(histogram.median()))
+                                (x, histogram, histogram.median())
                             })
                             .collect::<Vec<_>>();
-                        sorted_feature_values
-                            .as_mut_slice()
-                            .sort_unstable_by_key(|(_, _, median)| median.clone());
+                        sorted_feature_values.as_mut_slice().sort_unstable_by(
+                            |(_, _, median1), (_, _, median2)| {
+                                median1.partial_cmp(median2).unwrap_or(Ordering::Less)
+                            },
+                        );
 
                         let merged_attribute_hist = attr_histograms
                             .summarize()
@@ -47,27 +60,38 @@ impl<T: DiscreteValue, L: ContinuousValue> FindSplits<T> for TargetValueHistogra
 
                         let (x_subset, min_loss) = attr_histograms
                             .iter()
-                            .map(|(x_trial, _)| {
+                            .filter_map(|(x_trial, _)| {
                                 let split_index = sorted_feature_values
                                     .iter()
                                     .position(|(x, _, _)| **x == *x_trial)
                                     .expect("Find trial feature value in sorted set");
+                                
+                                // splitting at 0 would only send all possible value to the right node,
+                                // so it gets excluded here
+                                if split_index > 0 {
+                                    Some(split_index)
+                                } else {
+                                    None
+                                }
+                            })
+                            .map(|split_index| {
                                 let (left_slice, right_slice) =
                                     sorted_feature_values.split_at(split_index);
                                 let left_split = left_slice
                                     .iter()
                                     .map(|(_, hist, _)| *hist)
                                     .summarize()
-                                    .expect("summarize left split histograms");
+                                    .unwrap_or(Histogram::new(0));
                                 let right_split = right_slice
                                     .iter()
                                     .map(|(_, hist, _)| *hist)
                                     .summarize()
-                                    .expect("summarize right split histograms");
+                                    .unwrap_or(Histogram::new(0));
+                                debug!("split index: {}, l count: {}, r count: {}", split_index, left_slice.len(), right_slice.len());
 
                                 (
                                     left_slice.iter().map(|(x, _, _)| **x).collect::<Vec<T>>(),
-                                    OrderedFloat::from(Histogram::weighted_loss(
+                                    OrderedFloat::from(loss_func.weighted_loss(
                                         &merged_attribute_hist,
                                         &left_split,
                                         &right_split,
@@ -91,14 +115,15 @@ pub trait FindNodeLabel<L> {
     fn find_node_label(&self, node: &NodeIndex) -> Option<L>;
 }
 
-impl<T: DiscreteValue, L: ContinuousValue> FindNodeLabel<L> for TargetValueHistogramSet<T, L> {
+impl<T: DiscreteValue, L: ContinuousValue + fmt::Debug> FindNodeLabel<L> for TargetValueHistogramSet<T, L> {
     fn find_node_label(&self, node: &NodeIndex) -> Option<L> {
         let node_histogram = self
             .get(node)?
             .iter()
             .flat_map(|(_k, h)| h.iter().map(|(_k, h)| h))
             .summarize()?;
-        Some(node_histogram.median())
+
+        node_histogram.median()
     }
 }
 
@@ -156,24 +181,24 @@ impl<L: ContinuousValue> BaseHistogram<L> for Histogram<L> {
         self.bins.iter().fold(0, |sum, (_, d)| sum + d.count)
     }
 
-    fn median(&self) -> L {
+    fn median(&self) -> Option<L> {
         let mut count_target = self.count() / 2;
+        debug!("Median target count: {}", count_target);
         let (bin_addr, bin_data) = self
             .bins
             .iter()
             .skip_while(|(_, data)| {
-                let done = count_target < data.count;
-                if !done {
+                if count_target >= data.count {
                     count_target -= data.count;
-                }
-                done
+                    true
+                } else  { false }
             })
-            .next()
-            .unwrap();
+            .next()?;
+        debug!("Median bin/addr: {:?} -> {:?}", bin_addr, bin_data);
         let ratio = L::from(count_target).unwrap() / L::from(bin_data.count).unwrap();
         let l = bin_addr.left.into_inner();
         let r = bin_addr.right.into_inner();
-        l + (r - l) * ratio
+        Some(l + (r - l) * ratio)
     }
 }
 

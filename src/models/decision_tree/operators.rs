@@ -1,7 +1,6 @@
 
 use timely::ExchangeData;
 use models::decision_tree::tree::DecisionTree;
-use models::decision_tree::split_improvement::SplitImprovement;
 use data::TrainingData;
 use timely::dataflow::Stream;
 use timely::Data;
@@ -25,10 +24,10 @@ pub trait AggregateHistograms<S: Scope, T: ExchangeData, L: ExchangeData> {
 }
 
 /// Operator that splits the unlabeled leaf nodes in a decision tree according to Histogram data
-pub trait SplitLeaves<T, L, S: Scope, I: SplitImprovement<T, L>> {
+pub trait SplitLeaves<T, L, S: Scope, I> {
     /// Split all unlabeled leaves where a split would improve the classification accuracy
     /// if the innermost `time` exceeds the given maximum `levels`, the operator will stop
     /// splitting and instead only label the remaining leaf nodes with the most commonly
     /// occuring labels that reach the node.
-    fn split_leaves(&self, levels: u64, bins: u64) -> Stream<S, (usize, DecisionTree<T, L>)>;
+    fn split_leaves(&self, levels: u64, improvement_algo: I, bins: u64) -> Stream<S, (usize, DecisionTree<T, L>)>;
 }

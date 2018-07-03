@@ -25,6 +25,8 @@ extern crate approx;
 extern crate fnv;
 extern crate ordered_float;
 extern crate vec_map;
+#[macro_use]
+extern crate derive_more;
 
 use std::result::Result as StdResult;
 

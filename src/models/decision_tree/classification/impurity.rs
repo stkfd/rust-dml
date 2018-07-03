@@ -2,12 +2,14 @@ use models::decision_tree::classification::histogram::{HFloat, HistogramCollecti
 use models::decision_tree::tree::NodeIndex;
 use models::decision_tree::split_improvement::SplitImprovement;
 
+#[derive(Clone, Copy)]
 pub struct Gini;
 
 impl<T: HFloat, L> SplitImprovement<T, L> for Gini {
     type HistogramData = HistogramCollection<T, L>;
 
     fn split_improvement(
+        &self,
         histograms: &HistogramCollection<T, L>,
         node_index: NodeIndex,
         attribute: usize,

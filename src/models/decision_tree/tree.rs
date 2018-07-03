@@ -82,7 +82,7 @@ impl<T: PartialOrd, L: Copy> DecisionTree<T, L> {
         Zip::from(&mut labels)
             .and(samples.outer_iter())
             .apply(|label, sample| {
-                *label = *self.descend(sample).expect("Point label");
+                *label = *self.descend(sample).expect("Get point label");
             });
         
         labels
