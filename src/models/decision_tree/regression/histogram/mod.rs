@@ -1,8 +1,8 @@
+use data::TrainingData;
 use self::loss_functions::*;
 use data::serialization::Serializable;
 use models::decision_tree::histogram_generics::*;
-use models::decision_tree::tree::NodeIndex;
-use models::decision_tree::tree::Rule;
+use models::decision_tree::tree::{DecisionTree, Rule, NodeIndex, Node};
 use num_traits::Float;
 use ordered_float::OrderedFloat;
 use std::cmp::Ordering;
@@ -14,8 +14,10 @@ use std::ops::Bound::{Excluded, Included, Unbounded};
 pub mod loss_functions;
 pub mod operators;
 
+/// Nested set of histograms that contains
+/// Node -> Attribute Index -> Feature Value -> Histogram with target values
 pub type TargetValueHistogramSet<T, L> =
-    BTreeHistogramSet<NodeIndex, BTreeHistogramSet<usize, FnvHistogramSet<T, Histogram<L>>>>;
+    BTreeHistogramSet<NodeIndex, VecHistogramSet<FnvHistogramSet<T, Histogram<L>>>>;
 
 pub trait FindSplits<T, L: Float, Lf: WeightedLoss<L>> {
     fn find_best_splits(&self, nodes: &[NodeIndex], loss_func: &Lf) -> Vec<(NodeIndex, Rule<T>)>;
@@ -105,14 +107,10 @@ impl<T: DiscreteValue, L: ContinuousValue, Lf: WeightedLoss<L>> FindSplits<T, L,
                     .min_by(|(_, _, loss1), (_, _, loss2)| loss1.cmp(loss2))
                     .unwrap();
 
-                (*node, Rule::subset(*attr, x_subset))
+                (*node, Rule::subset(attr, x_subset))
             })
             .collect()
     }
-}
-
-pub trait FindNodeLabel<L> {
-    fn find_node_label(&self, node: &NodeIndex) -> Option<L>;
 }
 
 impl<T: DiscreteValue, L: ContinuousValue + fmt::Debug> FindNodeLabel<L> for TargetValueHistogramSet<T, L> {
@@ -529,6 +527,38 @@ mod test {
                 (&BinAddress::new(6.0, 7.0), &BinData::new(2, 13.0)),
             ]
         )
+    }
+}
+
+impl<'a, T: DiscreteValue, L: ContinuousValue> FromData<DecisionTree<T, L>, TrainingData<T, L>>
+    for TargetValueHistogramSet<T, L>
+{
+    fn from_data(tree: DecisionTree<T, L>, data: &[TrainingData<T, L>], bins: usize) -> Self {
+        let mut histograms = Self::default();
+
+        for training_data in data {
+            let x = training_data.x();
+            let y = training_data.y();
+
+            for (x_row, y_i) in x.outer_iter().zip(y.iter()) {
+                let node_index = tree
+                    .descend_iter(x_row)
+                    .last()
+                    .expect("Navigate to leaf node");
+                if let Node::Leaf { label: None } = tree[node_index] {
+                    let node_histograms =
+                        histograms.get_or_insert_with(&node_index, Default::default);
+                    for (i_attr, x_i) in x_row.iter().enumerate() {
+                        node_histograms
+                            .get_or_insert_with(&i_attr, Default::default)
+                            .get_or_insert_with(x_i, || BaseHistogram::new(bins))
+                            .insert(*y_i);
+                    }
+                }
+            }
+        }
+
+        histograms
     }
 }
 

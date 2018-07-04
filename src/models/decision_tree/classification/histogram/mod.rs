@@ -1,23 +1,19 @@
 #![allow(dead_code)]
 pub mod collection;
-pub mod operators;
 
 pub use self::collection::*;
-use approx::AbsDiffEq;
-use approx::RelativeEq;
-use approx::UlpsEq;
+use approx::{AbsDiffEq, RelativeEq, UlpsEq};
+use data::serialization::Serializable;
+use data::TrainingData;
+use models::decision_tree::histogram_generics::*;
+use models::decision_tree::tree::{DecisionTree, Node, NodeIndex};
 use num_traits::Float;
-use std::fmt::Display;
-use std::iter::Sum;
-
 use std::cmp::Ordering;
 
-pub trait HFloat: Sum + Float + Display + AbsDiffEq + RelativeEq + UlpsEq {}
-impl<T> HFloat for T
-where
-    T: Sum + Float + Display + AbsDiffEq + RelativeEq + UlpsEq,
-{
-}
+/// Nested set of histograms that contains
+/// Node -> Attribute Index -> Target Value -> Histogram with feature values
+pub type FeatureValueHistogramSet<T, L> =
+    BTreeHistogramSet<NodeIndex, VecHistogramSet<BTreeHistogramSet<L, Histogram<T>>>>;
 
 #[derive(Abomonation, Debug, Clone, PartialEq)]
 pub struct Histogram<T: Float> {
@@ -25,7 +21,64 @@ pub struct Histogram<T: Float> {
     data: Vec<Bin<T>>,
 }
 
-impl<T: HFloat> Histogram<T> {
+impl<T: ContinuousValue> BaseHistogram<T> for Histogram<T> {
+    /// Type of a bin in this histogram
+    type Bin = Bin<T>;
+
+    /// Instantiate a histogram with the given number of maximum bins
+    fn new(n_bins: usize) -> Self {
+        unimplemented!()
+    }
+
+    /// Insert a new data point into this histogram
+    fn insert(&mut self, value: T) {
+        unimplemented!()
+    }
+
+    /// Count the total number of data points in this histogram (over all bins)
+    fn count(&self) -> u64 {
+        unimplemented!()
+    }
+
+    /// Estimate the median value of the data points in this histogram
+    fn median(&self) -> Option<T> {
+        unimplemented!()
+    }
+}
+
+impl<T: ContinuousValue> HistogramSetItem for Histogram<T> {
+    /// Merge another instance of this type into this histogram
+    fn merge(&mut self, other: Self) {
+        unimplemented!()
+    }
+
+    /// Merge another instance of this type into this histogram
+    fn merge_borrowed(&mut self, other: &Self) {
+        unimplemented!()
+    }
+
+    /// Return an empty clone of the item that has otherwise identical attributes (e.g. number of maximum bins)
+    fn empty_clone(&self) -> Self {
+        unimplemented!()
+    }
+}
+
+impl<T: ContinuousValue> Serializable for Histogram<T> {
+    /// Serializable representation of this histogram set
+    type Serializable = (usize, Vec<Bin<T>>);
+
+    /// Turn this item into a serializable version of itself
+    fn into_serializable(self) -> Self::Serializable {
+        unimplemented!()
+    }
+
+    /// Recover a item from its serializable representation
+    fn from_serializable(serializable: Self::Serializable) -> Self {
+        unimplemented!()
+    }
+}
+
+impl<T: ContinuousValue> Histogram<T> {
     /// Initialize a new histogram maximum `bins` number of bins
     pub fn new(bins: usize) -> Histogram<T> {
         Histogram {
@@ -47,7 +100,8 @@ impl<T: HFloat> Histogram<T> {
 
                 if bins.len() > self.bins {
                     // find index of the two closest together bins
-                    let least_diff = bins.iter()
+                    let least_diff = bins
+                        .iter()
                         .zip(bins.iter().skip(1))
                         .map(|(current, next)| next.p - current.p)
                         .enumerate()
@@ -71,7 +125,8 @@ impl<T: HFloat> Histogram<T> {
         bins.sort_unstable();
 
         while bins.len() > self.bins {
-            let least_diff = bins.iter()
+            let least_diff = bins
+                .iter()
                 .zip(bins.iter().skip(1))
                 .map(|(current, next)| next.p - current.p)
                 .enumerate()
@@ -110,7 +165,8 @@ impl<T: HFloat> Histogram<T> {
             return self.data[0].p;
         }
 
-        let i = (self.data
+        let i = (self
+            .data
             .iter()
             .enumerate()
             .find(|(_, bin)| bin.p >= b)
@@ -153,8 +209,8 @@ impl<T: HFloat> Histogram<T> {
 
         let uniform = (1..bins)
             .map(|j| {
-                let s: T =
-                    (flt::<T>(j as f64) / flt(bins as f64)) * self.data.iter().map(|b| b.m).sum::<T>();
+                let s: T = (flt::<T>(j as f64) / flt(bins as f64))
+                    * self.data.iter().map(|b| b.m).sum::<T>();
                 debug_assert!(self.data.len() > 1);
                 let i = (1..self.data.len())
                     .find(|i| self.sum(p(*i)) > s)
@@ -240,7 +296,10 @@ impl<T: Float> PartialEq for Bin<T> {
     }
 }
 
-impl<T: AbsDiffEq + Float> AbsDiffEq for Bin<T> where T::Epsilon: Copy {
+impl<T: AbsDiffEq + Float> AbsDiffEq for Bin<T>
+where
+    T::Epsilon: Copy,
+{
     type Epsilon = T::Epsilon;
 
     fn default_epsilon() -> T::Epsilon {
@@ -280,7 +339,10 @@ where
     }
 }
 
-impl<T: HFloat> AbsDiffEq for Histogram<T> where T::Epsilon: Copy {
+impl<T: ContinuousValue> AbsDiffEq for Histogram<T>
+where
+    T::Epsilon: Copy,
+{
     type Epsilon = T::Epsilon;
 
     fn default_epsilon() -> T::Epsilon {
@@ -295,7 +357,7 @@ impl<T: HFloat> AbsDiffEq for Histogram<T> where T::Epsilon: Copy {
     }
 }
 
-impl<T: HFloat> UlpsEq for Histogram<T>
+impl<T: ContinuousValue> UlpsEq for Histogram<T>
 where
     T::Epsilon: Copy,
 {
@@ -325,6 +387,49 @@ fn flt<T: Float>(primitive: f64) -> T {
 
 fn bin<T: Float>(p: T, m: T) -> Bin<T> {
     Bin::new(p, m)
+}
+
+impl<T: ContinuousValue, L: DiscreteValue> FindNodeLabel<L> for FeatureValueHistogramSet<T, L> {
+    fn find_node_label(&self, node: &NodeIndex) -> Option<L> {
+        let histograms = self.get(node)?.into_iter().map(|(_k, h)| h).summarize()?;
+
+        histograms
+            .iter()
+            .map(|(label, h)| (label, h.sum_total()))
+            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(Ordering::Less))
+            .and_then(|most_common| Some(*most_common.0))
+    }
+}
+
+impl<'a, T: ContinuousValue, L: DiscreteValue> FromData<DecisionTree<T, L>, TrainingData<T, L>>
+    for FeatureValueHistogramSet<T, L>
+{
+    fn from_data(tree: DecisionTree<T, L>, data: &[TrainingData<T, L>], bins: usize) -> Self {
+        let mut histograms = Self::default();
+
+        for training_data in data {
+            let x = training_data.x();
+            let y = training_data.y();
+
+            for (x_row, y_i) in x.outer_iter().zip(y.iter()) {
+                let node_index = tree
+                    .descend_iter(x_row)
+                    .last()
+                    .expect("Navigate to leaf node");
+                if let Node::Leaf { label: None } = tree[node_index] {
+                    for (i_attr, x_i) in x_row.iter().enumerate() {
+                        histograms
+                            .get_or_insert_with(&node_index, Default::default)
+                            .get_or_insert_with(&i_attr, Default::default)
+                            .get_or_insert_with(y_i, || BaseHistogram::new(bins))
+                            .insert(*x_i);
+                    }
+                }
+            }
+        }
+
+        histograms
+    }
 }
 
 #[cfg(test)]
@@ -416,12 +521,8 @@ mod test {
             bin(32.67, 3.),
             bin(45., 1.),
         ].into();
-        
-        abs_diff_eq!(
-            h.sum(15.),
-            &3.275,
-            epsilon = 0.001
-        );
+
+        abs_diff_eq!(h.sum(15.), &3.275, epsilon = 0.001);
     }
 
     #[test]

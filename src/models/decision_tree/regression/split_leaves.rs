@@ -1,9 +1,9 @@
 use data::serialization::Serializable;
-use models::decision_tree::histogram_generics::{ContinuousValue, DiscreteValue};
+use models::decision_tree::histogram_generics::{ContinuousValue, DiscreteValue, FindNodeLabel};
 use models::decision_tree::operators::SplitLeaves;
 use models::decision_tree::regression::histogram::loss_functions::WeightedLoss;
 use models::decision_tree::regression::histogram::{
-    FindNodeLabel, FindSplits, TargetValueHistogramSet,
+    FindSplits, TargetValueHistogramSet,
 };
 use models::decision_tree::tree::DecisionTree;
 use std::fmt::Debug;

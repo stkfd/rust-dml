@@ -1,6 +1,5 @@
-use super::*;
-use models::decision_tree::tree::NodeIndex;
 
+/*
 /// Holds a set of histograms describing the samples reaching
 /// the leaf nodes in a decision tree.
 #[allow(type_complexity)]
@@ -17,7 +16,7 @@ impl<T: Float, L> Default for HistogramCollection<T, L> {
 
 impl<T, L> HistogramCollection<T, L>
 where
-    T: HFloat,
+    T: ContinuousValue,
     L: Copy + PartialEq,
 {
     /// Get a mutable reference to a histogram for a node/attribute/label
@@ -134,3 +133,4 @@ where
             .and_then(|most_common| Some(*most_common.0))
     }
 }
+*/

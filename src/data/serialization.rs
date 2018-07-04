@@ -1,10 +1,10 @@
-use abomonation::Abomonation;
 use ndarray::prelude::*;
 use std::convert::{From, TryInto};
+use timely::Data;
 
 pub trait Serializable {
     /// Serializable representation of this histogram set
-    type Serializable: Abomonation;
+    type Serializable: Data;
 
     /// Turn this item into a serializable version of itself
     fn into_serializable(self) -> Self::Serializable;
@@ -13,7 +13,7 @@ pub trait Serializable {
     fn from_serializable(serializable: Self::Serializable) -> Self;
 }
 
-#[derive(Clone, Abomonation, Eq, PartialEq, Debug, PartialOrd, Ord )]
+#[derive(Clone, Abomonation, Eq, PartialEq, Debug, PartialOrd, Ord)]
 pub struct AbomonableArray<A, D> {
     data: Vec<A>,
     strides: D,
@@ -44,10 +44,7 @@ impl<A> From<Array<A, IxDyn>> for AbomonableArray<A, Vec<usize>> {
 impl<A> Into<Array<A, IxDyn>> for AbomonableArray<A, Vec<usize>> {
     #[inline]
     fn into(self) -> Array<A, IxDyn> {
-        <Array<A, IxDyn>>::from_shape_vec(
-            self.shape.strides(self.strides),
-            self.data,
-        ).unwrap()
+        <Array<A, IxDyn>>::from_shape_vec(self.shape.strides(self.strides), self.data).unwrap()
     }
 }
 
@@ -61,7 +58,10 @@ macro_rules! impl_array {
                     slice.clone()
                 };
                 let strides: $index = {
-                    let slice: &$index = unsafe { &*(from.strides() as *const [isize] as *const [usize]) }.try_into().unwrap();
+                    let slice: &$index = unsafe {
+                        &*(from.strides() as *const [isize] as *const [usize])
+                    }.try_into()
+                        .unwrap();
                     slice.clone()
                 };
 
@@ -76,13 +76,11 @@ macro_rules! impl_array {
         impl<A> Into<Array<A, Dim<$index>>> for AbomonableArray<A, $index> {
             #[inline]
             fn into(self) -> Array<A, Dim<$index>> {
-                <Array<A, Dim<$index>>>::from_shape_vec(
-                    self.shape.strides(self.strides),
-                    self.data
-                ).unwrap()
+                <Array<A, Dim<$index>>>::from_shape_vec(self.shape.strides(self.strides), self.data)
+                    .unwrap()
             }
         }
-    }
+    };
 }
 
 impl_array!([usize; 1]);
@@ -93,26 +91,34 @@ impl_array!([usize; 5]);
 impl_array!([usize; 6]);
 
 macro_rules! impl_into_array_view {
-    ($index:ident , $abom_type:ident) => {
+    ($index:ident, $abom_type:ident) => {
         impl<'a, A> Into<ArrayView<'a, A, $index>> for &'a $abom_type<A>
-            where A: 'a
+        where
+            A: 'a,
         {
             #[inline]
             fn into(self) -> ArrayView<'a, A, $index> {
-                <ArrayView<'a, A, $index>>::from_shape(self.shape.clone().strides(self.strides.clone()), self.data.as_slice()).unwrap()
+                <ArrayView<'a, A, $index>>::from_shape(
+                    self.shape.clone().strides(self.strides.clone()),
+                    self.data.as_slice(),
+                ).unwrap()
             }
         }
     };
 }
 
 macro_rules! impl_into_array_view_mut {
-    ($index:ident , $abom_type:ident) => {
+    ($index:ident, $abom_type:ident) => {
         impl<'a, A> Into<ArrayViewMut<'a, A, $index>> for &'a mut $abom_type<A>
-            where A: 'a
+        where
+            A: 'a,
         {
             #[inline]
             fn into(self) -> ArrayViewMut<'a, A, $index> {
-                <ArrayViewMut<'a, A, $index>>::from_shape(self.shape.clone().strides(self.strides.clone()), self.data.as_mut_slice()).unwrap()
+                <ArrayViewMut<'a, A, $index>>::from_shape(
+                    self.shape.clone().strides(self.strides.clone()),
+                    self.data.as_mut_slice(),
+                ).unwrap()
             }
         }
     };
@@ -142,14 +148,20 @@ pub trait AsMutView<'a, D, T> {
     fn view_mut(self) -> ArrayViewMut<'a, T, D>;
 }
 
-impl<'a, A, D, T: 'a> AsView<'a, D, T> for A where A: Into<ArrayView<'a, T, D>> {
+impl<'a, A, D, T: 'a> AsView<'a, D, T> for A
+where
+    A: Into<ArrayView<'a, T, D>>,
+{
     #[inline]
     fn view(self) -> ArrayView<'a, T, D> {
         self.into()
     }
 }
 
-impl<'a, A, D, T: 'a> AsMutView<'a, D, T> for A where A: Into<ArrayViewMut<'a, T, D>> {
+impl<'a, A, D, T: 'a> AsMutView<'a, D, T> for A
+where
+    A: Into<ArrayViewMut<'a, T, D>>,
+{
     #[inline]
     fn view_mut(self) -> ArrayViewMut<'a, T, D> {
         self.into()
@@ -159,14 +171,11 @@ impl<'a, A, D, T: 'a> AsMutView<'a, D, T> for A where A: Into<ArrayViewMut<'a, T
 #[cfg(test)]
 mod test {
     use super::*;
-    use abomonation::{encode, decode};
+    use abomonation::{decode, encode};
 
     #[test]
     fn test_as_view() {
-        let a = arr2(&[
-            [1, 2, 3],
-            [4, 5, 6]
-        ]);
+        let a = arr2(&[[1, 2, 3], [4, 5, 6]]);
         let a_backup = a.clone();
         let a2: AbomonableArray<_, _> = a.into();
         let a_view = a2.view();
@@ -175,10 +184,7 @@ mod test {
 
     #[test]
     fn test_conversion() {
-        let a = arr2(&[
-            [1, 2, 3],
-            [4, 5, 6]
-        ]);
+        let a = arr2(&[[1, 2, 3], [4, 5, 6]]);
         let a_backup = a.clone();
         let a2: AbomonableArray<_, _> = a.into();
         let a3: Array2<_> = a2.into();
@@ -187,10 +193,7 @@ mod test {
 
     #[test]
     fn test_array_abomonate() {
-        let a = arr2(&[
-            [1, 2, 3],
-            [4, 5, 6]
-        ]);
+        let a = arr2(&[[1, 2, 3], [4, 5, 6]]);
         let a_clone = a.clone();
         let a2: AbomonableArray<_, _> = a.into();
 

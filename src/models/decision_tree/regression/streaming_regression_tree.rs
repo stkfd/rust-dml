@@ -5,6 +5,7 @@ use fnv::FnvHashMap;
 use models::decision_tree::histogram_generics::{ContinuousValue, DiscreteValue};
 use models::decision_tree::operators::{AggregateHistograms, CreateHistograms, SplitLeaves};
 use models::decision_tree::regression::histogram::loss_functions::TrimmedLadWeightedLoss;
+use models::decision_tree::regression::histogram::TargetValueHistogramSet;
 use models::decision_tree::tree::DecisionTree;
 use models::StreamingSupModel;
 use std::fmt::Debug;
@@ -41,8 +42,8 @@ impl<T, L>
         DecisionTree<T, L>,
     > for StreamingRegressionTree<L>
 where
-    T: DiscreteValue + Debug + ExchangeData,
-    L: ContinuousValue + Debug + ExchangeData,
+    T: DiscreteValue + ExchangeData,
+    L: ContinuousValue + ExchangeData,
 {
     /// Predict output from inputs. Waits until a decision tree has been received before processing
     /// any data coming in on the stream of samples. When a tree has been received, all sample data
@@ -121,7 +122,7 @@ where
                         .concat(&cycle)
                         .inspect(|x| info!("Begin tree iteration: {:?}", x))
                         .broadcast()
-                        .create_histograms(
+                        .create_histograms::<TargetValueHistogramSet<T, L>>(
                             &training_data.enter(tree_iter_scope),
                             self.bins,
                             self.points_per_worker as usize,

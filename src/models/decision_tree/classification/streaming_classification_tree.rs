@@ -3,16 +3,14 @@ use data::serialization::*;
 use data::TrainingData;
 use fnv::FnvHashMap;
 use models::decision_tree::classification::{
-    histogram::collection::HistogramCollection, histogram::operators::AggregateHistograms,
-    histogram::HFloat,
+    histogram::FeatureValueHistogramSet,
 };
+use models::decision_tree::histogram_generics::*;
 use models::decision_tree::operators::*;
 use models::decision_tree::split_improvement::SplitImprovement;
 use models::decision_tree::tree::DecisionTree;
 use models::StreamingSupModel;
 use num_traits::Float;
-use std::fmt::Debug;
-use std::hash::Hash;
 use std::marker::PhantomData;
 use timely::dataflow::channels::pact::Pipeline;
 use timely::dataflow::operators::*;
@@ -21,7 +19,7 @@ use timely::ExchangeData;
 use Result;
 
 /// Supervised model that builds a classification tree from streaming data
-pub struct StreamingClassificationTree<I: SplitImprovement<T, L>, T: Float, L> {
+pub struct StreamingClassificationTree<I: SplitImprovement<T, L>, T, L> {
     levels: u64,
     points_per_worker: u64,
     bins: usize,
@@ -32,9 +30,9 @@ pub struct StreamingClassificationTree<I: SplitImprovement<T, L>, T: Float, L> {
 
 impl<I, T, L> StreamingClassificationTree<I, T, L>
 where
-    T: ExchangeData + HFloat + Debug,
-    L: Debug + ExchangeData + Into<usize> + Copy + Eq + Hash + 'static,
-    I: SplitImprovement<T, L, HistogramData = HistogramCollection<T, L>> + 'static + Clone,
+    T: ExchangeData + ContinuousValue,
+    L: ExchangeData + DiscreteValue,
+    I: SplitImprovement<T, L, HistogramData = FeatureValueHistogramSet<T, L>> + 'static + Clone,
 {
     /// Creates a new model instance
     pub fn new(levels: u64, points_per_worker: u64, bins: usize, impurity_algo: I) -> Self {
@@ -57,9 +55,9 @@ impl<T, L, I>
         DecisionTree<T, L>,
     > for StreamingClassificationTree<I, T, L>
 where
-    T: ExchangeData + HFloat + Debug,
-    L: Debug + ExchangeData + Into<usize> + Copy + Eq + Hash + 'static,
-    I: SplitImprovement<T, L, HistogramData = HistogramCollection<T, L>> + 'static + Clone,
+    T: ExchangeData + ContinuousValue,
+    L: ExchangeData + DiscreteValue,
+    I: SplitImprovement<T, L, HistogramData = FeatureValueHistogramSet<T, L>> + 'static + Clone,
 {
     /// Predict output from inputs. Waits until a decision tree has been received before processing
     /// any data coming in on the stream of samples. When a tree has been received, all sample data
@@ -138,12 +136,13 @@ where
                         .concat(&cycle)
                         .inspect(|x| info!("Begin tree iteration: {:?}", x))
                         .broadcast()
-                        .create_histograms(
+                        .create_histograms::<FeatureValueHistogramSet<T, L>>(
                             &training_data.enter(tree_iter_scope),
                             self.bins,
                             self.points_per_worker as usize,
-                        )
-                        .aggregate_histograms();
+                        );
+                        //.aggregate_histograms();
+                    let agg: Stream<_, (_, <FeatureValueHistogramSet<T, L> as Serializable>::Serializable)> = histograms_and_trees.aggregate_histograms();
 
                     let (iterate, finished_tree) = SplitLeaves::split_leaves(
                         &histograms_and_trees,

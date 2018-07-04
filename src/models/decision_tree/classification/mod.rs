@@ -1,6 +1,6 @@
 #![allow(unknown_lints)]
 
-mod histogram;
+pub mod histogram;
 pub mod impurity;
 mod split_leaves;
 mod streaming_classification_tree;
