@@ -1,11 +1,14 @@
 use super::*;
 use std::iter::FromIterator;
-use vec_map::{VecMap, Entry::*, Iter};
+use vec_map::{Entry::*, Iter, VecMap};
 
 #[derive(Clone, Debug)]
 pub struct VecHistogramSet<H> {
     histograms: VecMap<H>,
 }
+
+#[derive(Abomonation, Clone)]
+pub struct SerializableVecHistogramSet<H>(Vec<(usize, H)>);
 
 impl<H> Default for VecHistogramSet<H> {
     fn default() -> Self {
@@ -15,25 +18,30 @@ impl<H> Default for VecHistogramSet<H> {
     }
 }
 
-impl<H> Serializable for VecHistogramSet<H>
+impl<H, Hs> From<VecHistogramSet<H>> for SerializableVecHistogramSet<Hs>
 where
     H: HistogramSetItem,
+    Hs: From<H>,
 {
-    type Serializable = Vec<(usize, H::Serializable)>;
-
     /// Turn this item into a serializable version of itself
-    fn into_serializable(self) -> Self::Serializable {
-        self.histograms
-            .into_iter()
-            .map(|(k, v)| (k, v.into_serializable()))
-            .collect()
+    fn from(set: VecHistogramSet<H>) -> Self {
+        SerializableVecHistogramSet(
+            set.histograms
+                .into_iter()
+                .map(|(k, v)| (k, Hs::from(v)))
+                .collect(),
+        )
     }
+}
 
+impl<H, Hs> Into<VecHistogramSet<H>> for SerializableVecHistogramSet<Hs>
+where
+    H: HistogramSetItem,
+    Hs: Into<H>
+{
     /// Recover a item from its serializable representation
-    fn from_serializable(serializable: Self::Serializable) -> Self {
-        let histograms = serializable
-            .into_iter()
-            .map(|(k, ser)| (k, H::from_serializable(ser)));
+    fn into(self) -> VecHistogramSet<H> {
+        let histograms = self.0.into_iter().map(|(k, ser)| (k, ser.into()));
         VecHistogramSet {
             histograms: VecMap::from_iter(histograms),
         }
@@ -44,6 +52,8 @@ impl<H> HistogramSetItem for VecHistogramSet<H>
 where
     H: HistogramSetItem,
 {
+    type Serializable = SerializableVecHistogramSet<H::Serializable>;
+
     fn merge(&mut self, other: Self) {
         for (key, value) in other.histograms.into_iter() {
             match self.histograms.entry(key) {
@@ -91,11 +101,7 @@ where
         self.histograms.entry(key.clone()).or_insert_with(insert_fn)
     }
 
-    fn select<'a>(
-        &mut self,
-        keys: impl IntoIterator<Item = &'a usize>,
-        callback: impl Fn(&mut H),
-    ) {
+    fn select<'a>(&mut self, keys: impl IntoIterator<Item = &'a usize>, callback: impl Fn(&mut H)) {
         for key in keys.into_iter() {
             if let Some(entry) = self.histograms.get_mut(*key) {
                 callback(entry);

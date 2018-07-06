@@ -1,19 +1,18 @@
 #![allow(dead_code)]
-pub mod collection;
+pub mod feature_value_set;
 
-pub use self::collection::*;
+pub use self::feature_value_set::*;
 use approx::{AbsDiffEq, RelativeEq, UlpsEq};
-use data::serialization::Serializable;
 use data::TrainingData;
 use models::decision_tree::histogram_generics::*;
 use models::decision_tree::tree::{DecisionTree, Node, NodeIndex};
 use num_traits::Float;
 use std::cmp::Ordering;
 
-/// Nested set of histograms that contains
-/// Node -> Attribute Index -> Target Value -> Histogram with feature values
-pub type FeatureValueHistogramSet<T, L> =
-    BTreeHistogramSet<NodeIndex, VecHistogramSet<BTreeHistogramSet<L, Histogram<T>>>>;
+/*pub type SerializableFeatureValueHistogramSet<T, L> = SerializableBTreeHistogramSet<
+    NodeIndex,
+    SerializableVecHistogramSet<SerializableBTreeHistogramSet<L, Histogram<T>>>,
+>;*/
 
 #[derive(Abomonation, Debug, Clone, PartialEq)]
 pub struct Histogram<T: Float> {
@@ -26,71 +25,15 @@ impl<T: ContinuousValue> BaseHistogram<T> for Histogram<T> {
     type Bin = Bin<T>;
 
     /// Instantiate a histogram with the given number of maximum bins
-    fn new(n_bins: usize) -> Self {
-        unimplemented!()
-    }
-
-    /// Insert a new data point into this histogram
-    fn insert(&mut self, value: T) {
-        unimplemented!()
-    }
-
-    /// Count the total number of data points in this histogram (over all bins)
-    fn count(&self) -> u64 {
-        unimplemented!()
-    }
-
-    /// Estimate the median value of the data points in this histogram
-    fn median(&self) -> Option<T> {
-        unimplemented!()
-    }
-}
-
-impl<T: ContinuousValue> HistogramSetItem for Histogram<T> {
-    /// Merge another instance of this type into this histogram
-    fn merge(&mut self, other: Self) {
-        unimplemented!()
-    }
-
-    /// Merge another instance of this type into this histogram
-    fn merge_borrowed(&mut self, other: &Self) {
-        unimplemented!()
-    }
-
-    /// Return an empty clone of the item that has otherwise identical attributes (e.g. number of maximum bins)
-    fn empty_clone(&self) -> Self {
-        unimplemented!()
-    }
-}
-
-impl<T: ContinuousValue> Serializable for Histogram<T> {
-    /// Serializable representation of this histogram set
-    type Serializable = (usize, Vec<Bin<T>>);
-
-    /// Turn this item into a serializable version of itself
-    fn into_serializable(self) -> Self::Serializable {
-        unimplemented!()
-    }
-
-    /// Recover a item from its serializable representation
-    fn from_serializable(serializable: Self::Serializable) -> Self {
-        unimplemented!()
-    }
-}
-
-impl<T: ContinuousValue> Histogram<T> {
-    /// Initialize a new histogram maximum `bins` number of bins
-    pub fn new(bins: usize) -> Histogram<T> {
+    fn new(bins: usize) -> Self {
         Histogram {
             bins,
             data: Vec::with_capacity(bins),
         }
     }
 
-    /// Inserts a new data point into a bin, either creating a new bin to contain it
-    /// or if the histogram already contains the maximum number of bins, merging it
-    /// into an existing bin
-    pub fn update(&mut self, p: T) {
+    /// Insert a new data point into this histogram
+    fn insert(&mut self, p: T) {
         let bins = &mut self.data;
 
         match bins.binary_search_by(|probe| probe.p.partial_cmp(&p).unwrap_or(Ordering::Less)) {
@@ -117,8 +60,22 @@ impl<T: ContinuousValue> Histogram<T> {
         }
     }
 
-    /// Merges the contents of another histogram into this histogram
-    pub fn merge(&mut self, other: &Histogram<T>) {
+    /// Count the total number of data points in this histogram (over all bins)
+    fn count(&self) -> u64 {
+        self.data.iter().fold(flt(0.), |acc: T, bin| acc + bin.m).round().to_u64().unwrap()
+    }
+}
+
+impl<T: ContinuousValue> HistogramSetItem for Histogram<T> {
+    type Serializable = Self;
+
+    /// Merge another instance of this type into this histogram
+    fn merge(&mut self, other: Self) {
+        self.merge_borrowed(&other)
+    }
+
+    /// Merge another instance of this type into this histogram
+    fn merge_borrowed(&mut self, other: &Self) {
         let bins = &mut self.data;
         let other_bins = &other.data;
         bins.extend(other_bins);
@@ -150,6 +107,13 @@ impl<T: ContinuousValue> Histogram<T> {
         }
     }
 
+    /// Return an empty clone of the item that has otherwise identical attributes (e.g. number of maximum bins)
+    fn empty_clone(&self) -> Self {
+        Histogram::new(self.bins)
+    }
+}
+
+impl<T: ContinuousValue> Histogram<T> {
     /// Estimates the number of points in the interval [-inf, b]
     pub fn sum(&self, b: T) -> T {
         if self.data.is_empty() {
@@ -191,11 +155,6 @@ impl<T: ContinuousValue> Histogram<T> {
         debug_assert!(sum.is_finite());
 
         sum + bin_i.m / two
-    }
-
-    /// Estimates the number of points in the whole histogram
-    pub fn sum_total(&self) -> T {
-        self.data.iter().fold(flt(0.), |acc, bin| acc + bin.m)
     }
 
     #[allow(many_single_char_names)]
@@ -395,7 +354,7 @@ impl<T: ContinuousValue, L: DiscreteValue> FindNodeLabel<L> for FeatureValueHist
 
         histograms
             .iter()
-            .map(|(label, h)| (label, h.sum_total()))
+            .map(|(label, h)| (label, h.count()))
             .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(Ordering::Less))
             .and_then(|most_common| Some(*most_common.0))
     }
@@ -404,7 +363,7 @@ impl<T: ContinuousValue, L: DiscreteValue> FindNodeLabel<L> for FeatureValueHist
 impl<'a, T: ContinuousValue, L: DiscreteValue> FromData<DecisionTree<T, L>, TrainingData<T, L>>
     for FeatureValueHistogramSet<T, L>
 {
-    fn from_data(tree: DecisionTree<T, L>, data: &[TrainingData<T, L>], bins: usize) -> Self {
+    fn from_data(tree: &DecisionTree<T, L>, data: &[TrainingData<T, L>], bins: usize) -> Self {
         let mut histograms = Self::default();
 
         for training_data in data {
@@ -435,6 +394,7 @@ impl<'a, T: ContinuousValue, L: DiscreteValue> FromData<DecisionTree<T, L>, Trai
 #[cfg(test)]
 mod test {
     use super::{bin, Histogram};
+    use models::decision_tree::histogram_generics::*;
 
     const INPUT: &[f64] = &[23., 19., 10., 16., 36., 2., 9., 32., 30., 45.];
 
@@ -442,7 +402,7 @@ mod test {
     fn update() {
         let mut hist: Histogram<f64> = Histogram::new(5);
         for i in &[23., 19., 10., 16., 36.] {
-            hist.update(*i);
+            hist.insert(*i);
         }
 
         ulps_eq!(
@@ -457,7 +417,7 @@ mod test {
             max_ulps = 2,
         );
 
-        hist.update(2.);
+        hist.insert(2.);
         ulps_eq!(
             hist,
             &vec![
@@ -470,7 +430,7 @@ mod test {
             max_ulps = 2,
         );
 
-        hist.update(9.);
+        hist.insert(9.);
         ulps_eq!(
             hist,
             &vec![
@@ -489,15 +449,15 @@ mod test {
         let mut h1 = [23., 19., 10., 16., 36., 2., 9.].iter().fold(
             Histogram::new(5),
             |mut h, i| {
-                h.update(*i);
+                h.insert(*i);
                 h
             },
         );
         let h2 = [32., 30., 45.].iter().fold(Histogram::new(5), |mut h, i| {
-            h.update(*i);
+            h.insert(*i);
             h
         });
-        h1.merge(&h2);
+        h1.merge_borrowed(&h2);
 
         abs_diff_eq!(
             h1,

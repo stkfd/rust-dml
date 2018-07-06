@@ -15,25 +15,29 @@ impl<T: ContinuousValue, L: DiscreteValue> SplitImprovement<T, L> for Gini {
         node_index: NodeIndex,
         attribute: usize,
         split_at: T,
-    ) -> Option<T>
-    {
+    ) -> Option<T> {
         let selected_histograms = histograms.get(&node_index)?.get(&attribute)?;
         // sum all samples reaching this node/attribute combination
-        let histogram_sums: Vec<T> = selected_histograms.iter().map(|h| h.1.sum_total()).collect();
-        let total = histogram_sums
+        let histogram_counts: Vec<T> = selected_histograms
+            .iter()
+            .map(|h| T::from(h.1.count()).unwrap())
+            .collect();
+        let total = histogram_counts
             .iter()
             .fold(T::zero(), |total, &sum| total + sum);
 
         // impurity at the node that is being split
         let node_impurity = T::one()
-            - histogram_sums
+            - histogram_counts
                 .iter()
                 // likelihood of samples reaching this node/attribute having some label
                 .map(|&s| s / total)
                 .fold(T::zero(), |acc, p| acc + p * p);
 
-        let histogram_sum_left_split: Vec<T> =
-            selected_histograms.iter().map(|h| h.1.sum(split_at)).collect();
+        let histogram_sum_left_split: Vec<T> = selected_histograms
+            .iter()
+            .map(|h| h.1.sum(split_at))
+            .collect();
         let total_left_split = histogram_sum_left_split
             .iter()
             .fold(T::zero(), |total, &sum| total + sum);

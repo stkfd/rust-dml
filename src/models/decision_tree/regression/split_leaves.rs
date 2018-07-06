@@ -1,10 +1,9 @@
-use data::serialization::Serializable;
-use models::decision_tree::histogram_generics::{ContinuousValue, DiscreteValue, FindNodeLabel};
+use models::decision_tree::histogram_generics::{
+    ContinuousValue, DiscreteValue, FindNodeLabel, HistogramSetItem,
+};
 use models::decision_tree::operators::SplitLeaves;
 use models::decision_tree::regression::histogram::loss_functions::WeightedLoss;
-use models::decision_tree::regression::histogram::{
-    FindSplits, TargetValueHistogramSet,
-};
+use models::decision_tree::regression::histogram::{FindSplits, TargetValueHistogramSet};
 use models::decision_tree::tree::DecisionTree;
 use std::fmt::Debug;
 use timely::dataflow::channels::pact::Pipeline;
@@ -19,12 +18,12 @@ impl<S, Ts1, T, L, I> SplitLeaves<T, L, S, I>
         S,
         (
             DecisionTree<T, L>,
-            <TargetValueHistogramSet<T, L> as Serializable>::Serializable,
+            <TargetValueHistogramSet<T, L> as HistogramSetItem>::Serializable,
         ),
     > where
     (
         DecisionTree<T, L>,
-        <TargetValueHistogramSet<T, L> as Serializable>::Serializable,
+        <TargetValueHistogramSet<T, L> as HistogramSetItem>::Serializable,
     ): Data,
     S: Scope<Timestamp = Product<Ts1, u64>>,
     Ts1: Timestamp,
@@ -43,13 +42,13 @@ impl<S, Ts1, T, L, I> SplitLeaves<T, L, S, I>
                 let loss_func = loss_func.clone();
                 input.for_each(|time, data| {
                     for (mut tree, flat_histograms) in data.drain(..) {
-                        let histograms: TargetValueHistogramSet<_, _> =
-                            Serializable::from_serializable(flat_histograms);
+                        let histograms: TargetValueHistogramSet<_, _> = flat_histograms.into();
                         let current_iteration = time.inner;
                         let mut split_leaves = 0;
                         if current_iteration < levels {
                             debug!("Begin splitting phase");
-                            let splits = histograms.find_best_splits(&tree.unlabeled_leaves(), &loss_func);
+                            let splits =
+                                histograms.find_best_splits(&tree.unlabeled_leaves(), &loss_func);
                             for (node, rule) in splits {
                                 // TODO: add intermediary labels to nodes
                                 tree.split(node, rule, histograms.find_node_label(&node));

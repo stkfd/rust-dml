@@ -1,17 +1,5 @@
 use ndarray::prelude::*;
 use std::convert::{From, TryInto};
-use timely::Data;
-
-pub trait Serializable {
-    /// Serializable representation of this histogram set
-    type Serializable: Data;
-
-    /// Turn this item into a serializable version of itself
-    fn into_serializable(self) -> Self::Serializable;
-
-    /// Recover a item from its serializable representation
-    fn from_serializable(serializable: Self::Serializable) -> Self;
-}
 
 #[derive(Clone, Abomonation, Eq, PartialEq, Debug, PartialOrd, Ord)]
 pub struct AbomonableArray<A, D> {

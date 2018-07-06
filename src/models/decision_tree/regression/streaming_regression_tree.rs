@@ -8,7 +8,6 @@ use models::decision_tree::regression::histogram::loss_functions::TrimmedLadWeig
 use models::decision_tree::regression::histogram::TargetValueHistogramSet;
 use models::decision_tree::tree::DecisionTree;
 use models::StreamingSupModel;
-use std::fmt::Debug;
 use timely::dataflow::channels::pact::Pipeline;
 use timely::dataflow::operators::*;
 use timely::dataflow::{Scope, Stream};
@@ -127,17 +126,18 @@ where
                             self.bins,
                             self.points_per_worker as usize,
                         )
-                        .aggregate_histograms();
+                        .aggregate_histograms::<TargetValueHistogramSet<T, L>>();
 
-                    let (iterate, finished_tree) = SplitLeaves::split_leaves(
-                        &histograms_and_trees,
-                        self.levels,
-                        TrimmedLadWeightedLoss(self.trim_ratio),
-                        self.bins as u64,
-                    ).map(move |(split_leaves, tree)| {
-                        info!("Split {} leaves", split_leaves);
-                        tree
-                    })
+                    let (iterate, finished_tree) = histograms_and_trees
+                        .split_leaves(
+                            self.levels,
+                            TrimmedLadWeightedLoss(self.trim_ratio),
+                            self.bins as u64,
+                        )
+                        .map(move |(split_leaves, tree)| {
+                            info!("Split {} leaves", split_leaves);
+                            tree
+                        })
                         .branch(move |time, _| time.inner >= levels);
                     iterate.connect_loop(loop_handle);
                     finished_tree.leave()

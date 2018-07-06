@@ -1,13 +1,16 @@
-use std::collections::hash_map::Iter;
 use super::*;
 use fnv::FnvHashMap;
 use std::collections::hash_map::Entry::*;
+use std::collections::hash_map::Iter;
 use std::iter::FromIterator;
 
 #[derive(Clone, Debug)]
 pub struct FnvHistogramSet<K: Eq + Hash, H> {
     histograms: FnvHashMap<K, H>,
 }
+
+#[derive(Clone, Abomonation)]
+pub struct SerializableFnvHistogramSet<K, H>(Vec<(K, H)>);
 
 impl<K: Eq + Hash, H> Default for FnvHistogramSet<K, H> {
     fn default() -> Self {
@@ -17,26 +20,32 @@ impl<K: Eq + Hash, H> Default for FnvHistogramSet<K, H> {
     }
 }
 
-impl<K, H> Serializable for FnvHistogramSet<K, H>
+impl<K, H, Hs> From<FnvHistogramSet<K, H>> for SerializableFnvHistogramSet<K, Hs>
 where
     K: DiscreteValue,
     H: HistogramSetItem,
+    Hs: From<H>
 {
-    type Serializable = Vec<(K, H::Serializable)>;
-
     /// Turn this item into a serializable version of itself
-    fn into_serializable(self) -> Self::Serializable {
-        self.histograms
-            .into_iter()
-            .map(|(k, v)| (k, v.into_serializable()))
-            .collect()
+    fn from(set: FnvHistogramSet<K, H>) -> Self {
+        SerializableFnvHistogramSet(
+            set.histograms
+                .into_iter()
+                .map(|(k, v)| (k, Hs::from(v)))
+                .collect(),
+        )
     }
+}
 
+impl<K, H, Hs> Into<FnvHistogramSet<K, H>> for SerializableFnvHistogramSet<K, Hs>
+where
+    K: DiscreteValue,
+    H: HistogramSetItem,
+    Hs: Into<H>,
+{
     /// Recover a item from its serializable representation
-    fn from_serializable(serializable: Self::Serializable) -> Self {
-        let histograms = serializable
-            .into_iter()
-            .map(|(k, ser)| (k, H::from_serializable(ser)));
+    fn into(self) -> FnvHistogramSet<K, H> {
+        let histograms = self.0.into_iter().map(|(k, ser)| (k, ser.into()));
         FnvHistogramSet {
             histograms: FnvHashMap::from_iter(histograms),
         }
@@ -48,6 +57,8 @@ where
     K: DiscreteValue,
     H: HistogramSetItem,
 {
+    type Serializable = SerializableFnvHistogramSet<K, H::Serializable>;
+
     fn merge(&mut self, other: Self) {
         for (key, value) in other.histograms.into_iter() {
             match self.histograms.entry(key) {
@@ -96,11 +107,7 @@ where
         self.histograms.entry(key.clone()).or_insert_with(insert_fn)
     }
 
-    fn select<'a>(
-        &mut self,
-        keys: impl IntoIterator<Item = &'a K>,
-        callback: impl Fn(&mut H),
-    ) {
+    fn select<'a>(&mut self, keys: impl IntoIterator<Item = &'a K>, callback: impl Fn(&mut H)) {
         for key in keys.into_iter() {
             if let Some(entry) = self.histograms.get_mut(key) {
                 callback(entry);

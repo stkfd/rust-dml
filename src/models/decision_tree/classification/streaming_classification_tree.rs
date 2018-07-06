@@ -2,15 +2,12 @@ use data::dataflow::{Branch, ExchangeEvenly, SegmentTrainingData};
 use data::serialization::*;
 use data::TrainingData;
 use fnv::FnvHashMap;
-use models::decision_tree::classification::{
-    histogram::FeatureValueHistogramSet,
-};
+use models::decision_tree::classification::histogram::FeatureValueHistogramSet;
 use models::decision_tree::histogram_generics::*;
 use models::decision_tree::operators::*;
 use models::decision_tree::split_improvement::SplitImprovement;
 use models::decision_tree::tree::DecisionTree;
 use models::StreamingSupModel;
-use num_traits::Float;
 use std::marker::PhantomData;
 use timely::dataflow::channels::pact::Pipeline;
 use timely::dataflow::operators::*;
@@ -141,18 +138,15 @@ where
                             self.bins,
                             self.points_per_worker as usize,
                         );
-                        //.aggregate_histograms();
-                    let agg: Stream<_, (_, <FeatureValueHistogramSet<T, L> as Serializable>::Serializable)> = histograms_and_trees.aggregate_histograms();
+                    //.aggregate_histograms();
+                    //let agg = AggregateHistograms::<_, FeatureValueHistogramSet<T, L>, _>::aggregate_histograms(&histograms_and_trees);
 
-                    let (iterate, finished_tree) = SplitLeaves::split_leaves(
-                        &histograms_and_trees,
-                        self.levels,
-                        self.impurity_algo.clone(),
-                        self.bins as u64,
-                    ).map(move |(split_leaves, tree)| {
-                        info!("Split {} leaves", split_leaves);
-                        tree
-                    })
+                    let (iterate, finished_tree) = histograms_and_trees
+                        .split_leaves(self.levels, self.impurity_algo.clone(), self.bins as u64)
+                        .map(move |(split_leaves, tree)| {
+                            info!("Split {} leaves", split_leaves);
+                            tree
+                        })
                         .branch(move |time, _| time.inner >= levels);
                     iterate.connect_loop(loop_handle);
                     finished_tree.leave()

@@ -1,47 +1,48 @@
 use approx::{AbsDiffEq, RelativeEq, UlpsEq};
-use data::serialization::Serializable;
 use models::decision_tree::tree::NodeIndex;
 use num_traits::Float;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::iter::Sum;
-use timely::Data;
+use timely::ExchangeData;
 
 mod btree;
 mod fnv;
 mod vec;
 
-pub use self::btree::BTreeHistogramSet;
-pub use self::fnv::FnvHistogramSet;
-pub use self::vec::VecHistogramSet;
+pub use self::btree::{BTreeHistogramSet, SerializableBTreeHistogramSet};
+pub use self::fnv::{FnvHistogramSet, SerializableFnvHistogramSet};
+pub use self::vec::{SerializableVecHistogramSet, VecHistogramSet};
 
-pub trait HistogramSet<K, T: HistogramSetItem>: Default {
-    fn get(&self, key: &K) -> Option<&T>;
-    fn get_mut(&mut self, key: &K) -> Option<&mut T>;
 
-    fn get_or_insert_with(&mut self, key: &K, insert_fn: impl Fn() -> T) -> &mut T;
+pub trait HistogramSet<K, H: HistogramSetItem>: Default {
+    fn get(&self, key: &K) -> Option<&H>;
 
-    fn select<'a>(&mut self, keys: impl IntoIterator<Item = &'a K>, callback: impl Fn(&mut T))
+    fn select<'a>(&mut self, keys: impl IntoIterator<Item = &'a K>, callback: impl Fn(&mut H))
     where
         K: 'a;
 
-    fn summarize<'a: 'b, 'b>(&'a self) -> Option<T>
+    fn get_mut(&mut self, key: &K) -> Option<&mut H>;
+
+    fn get_or_insert_with(&mut self, key: &K, insert_fn: impl Fn() -> H) -> &mut H;
+
+    fn summarize<'a: 'b, 'b>(&'a self) -> Option<H>
     where
-        &'a Self: IntoIterator<Item = (&'b K, &'b T)>,
-        T: 'b,
+        &'a Self: IntoIterator<Item = (&'b K, &'b H)>,
+        H: 'b,
         Self: 'a + 'b,
         K: 'b,
     {
-        self.into_iter().map(|(_k, h)| h).summarize()
+        let seed = self.into_iter().next()?.1.empty_clone();
+        Some(self.into_iter().fold(seed, |mut agg, item| {
+            agg.merge_borrowed(item.1);
+            agg
+        }))
     }
 }
 
 pub trait Summarize<H> {
     fn summarize(self) -> Option<H>;
-}
-
-pub trait FindNodeLabel<L> {
-    fn find_node_label(&self, node: &NodeIndex) -> Option<L>;
 }
 
 impl<'b, H, Set> Summarize<H> for Set
@@ -71,18 +72,25 @@ pub trait BaseHistogram<T>: HistogramSetItem {
 
     /// Count the total number of data points in this histogram (over all bins)
     fn count(&self) -> u64;
+}
 
+pub trait Median<T> {
     /// Estimate the median value of the data points in this histogram
     fn median(&self) -> Option<T>;
 }
 
-pub trait ContinuousValue: Float + Data + Debug + AbsDiffEq + RelativeEq + UlpsEq + Sum {}
-impl<T: Float + Data + Debug + AbsDiffEq + RelativeEq + UlpsEq + Sum> ContinuousValue for T {}
+pub trait ContinuousValue:
+    Float + ExchangeData + Sum + AbsDiffEq + RelativeEq + UlpsEq + Debug
+{
+}
+impl<T: Float + ExchangeData + Sum + AbsDiffEq + RelativeEq + UlpsEq + Debug> ContinuousValue for T {}
 
-pub trait DiscreteValue: Ord + Eq + Hash + Copy + Data + Debug {}
-impl<T: Ord + Eq + Hash + Copy + Data + Debug> DiscreteValue for T {}
+pub trait DiscreteValue: Ord + Eq + Hash + Copy + ExchangeData + Debug {}
+impl<T: Ord + Eq + Hash + Copy + ExchangeData + Debug> DiscreteValue for T {}
 
-pub trait HistogramSetItem: Clone + Serializable {
+pub trait HistogramSetItem: Clone {
+    type Serializable: From<Self> + Into<Self> + ExchangeData;
+
     /// Merge another instance of this type into this histogram
     fn merge(&mut self, other: Self);
 
@@ -94,26 +102,9 @@ pub trait HistogramSetItem: Clone + Serializable {
 }
 
 pub trait FromData<Tr, D> {
-    fn from_data(tree: Tr, data: &[D], bins: usize) -> Self;
+    fn from_data(tree: &Tr, data: &[D], bins: usize) -> Self;
 }
 
-/*
-/// Nested set of histograms that contains
-/// Node -> Attribute Index -> Feature Value -> Histogram with target values
-pub trait GenericTargetValueHistogramSet<T, L>: HistogramSet<NodeIndex, HistogramSet<usize, HistogramSet<L, BaseHistogram<L, Serializable=usize>>>> {}
-impl<T: DiscreteValue, L: ContinuousValue, H> GenericTargetValueHistogramSet<T, L>
-    for BTreeHistogramSet<NodeIndex, VecHistogramSet<FnvHistogramSet<T, H>>>
-where
-    H: BaseHistogram<L>,
-{
+pub trait FindNodeLabel<T> {
+    fn find_node_label(&self, node: &NodeIndex) -> Option<T>;
 }
-
-
-pub trait GenericFeatureValueHistogramSet<T, L> {}
-impl<T: ContinuousValue, L: DiscreteValue, H> GenericFeatureValueHistogramSet<T, L>
-    for BTreeHistogramSet<NodeIndex, VecHistogramSet<FnvHistogramSet<L, H>>>
-where
-    H: BaseHistogram<T>,
-{
-}
-*/

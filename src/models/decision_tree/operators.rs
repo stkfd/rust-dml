@@ -1,4 +1,3 @@
-use data::serialization::Serializable;
 use data::TrainingData;
 use fnv::FnvHashMap;
 use models::decision_tree::histogram_generics::*;
@@ -17,7 +16,7 @@ pub trait CreateHistograms<S: Scope, T: Data, L: Data> {
     /// Takes a set of `TrainingData` and a stream of decision trees (as they are created).
     /// For each decision tree, compiles a set of histograms describing the samples which
     /// arrive at each unlabeled leaf node in the tree.
-    fn create_histograms<H: Serializable + FromData<DecisionTree<T, L>, TrainingData<T, L>>>(
+    fn create_histograms<H: HistogramSetItem + FromData<DecisionTree<T, L>, TrainingData<T, L>>>(
         &self,
         training_data: &Stream<S, TrainingData<T, L>>,
         bins: usize,
@@ -32,7 +31,7 @@ where
     T: Data,
     L: Data,
 {
-    fn create_histograms<H: Serializable + FromData<DecisionTree<T, L>, TrainingData<T, L>>>(
+    fn create_histograms<H: HistogramSetItem + FromData<DecisionTree<T, L>, TrainingData<T, L>>>(
         &self,
         training_data: &Stream<S, TrainingData<T, L>>,
         bins: usize,
@@ -47,7 +46,6 @@ where
             |_, _| {
                 let mut data_stash = FnvHashMap::default();
                 let mut tree_stash = FnvHashMap::default();
-                let mut n_attributes = None;
 
                 move |in_tree, in_data, out| {
                     in_data.for_each(|cap, data| {
@@ -104,10 +102,9 @@ where
                             debug!("Worker {} collecting histograms", worker);
                             let (_, _, data) = data_stash.get(&time.outer).expect("Retrieve data");
 
-                            let histograms = H::from_data(tree, data, bins);
+                            let histograms = H::from_data(&tree, data, bins);
 
-                            out.session(&time)
-                                .give((tree.clone(), histograms.into_serializable()));
+                            out.session(&time).give((tree.clone(), histograms.into()));
                         }
                     }
 
@@ -137,21 +134,24 @@ pub trait SplitLeaves<T, L, S: Scope, I> {
     ) -> Stream<S, (usize, DecisionTree<T, L>)>;
 }
 
-pub trait AggregateHistograms<S: Scope, Tree, Set, Key, Item> {
-    fn aggregate_histograms(&self) -> Self;
+pub trait AggregateHistograms<S: Scope, SetS: ExchangeData> {
+    fn aggregate_histograms<Set>(&self) -> Self
+    where
+        Set: HistogramSetItem<Serializable = SetS> + 'static,
+        SetS: From<Set> + Into<Set>;
 }
 
-impl<S, Tree, Set, Key, Item> AggregateHistograms<S, Tree, Set, Key, Item>
-    for Stream<S, (Tree, <Set as Serializable>::Serializable)>
+impl<S, Tree, SetS> AggregateHistograms<S, SetS> for Stream<S, (Tree, SetS)>
 where
     S: Scope,
+    SetS: ExchangeData,
     Tree: ExchangeData + PartialEq + Debug,
-    Set: HistogramSet<Key, Item> + HistogramSetItem + 'static,
-    Set::Serializable: ExchangeData,
-    Key: ExchangeData + DiscreteValue,
-    Item: HistogramSetItem,
 {
-    fn aggregate_histograms(&self) -> Self {
+    fn aggregate_histograms<Set>(&self) -> Self
+    where
+        Set: HistogramSetItem<Serializable = SetS> + 'static,
+        SetS: From<Set> + Into<Set>,
+    {
         let worker = self.scope().index();
         self.exchange(|_| 0_u64)
             .unary_frontier(Pipeline, "MergeHistogramSets", |_, _| {
@@ -163,14 +163,14 @@ where
                         debug!("Receiving histograms for merging");
                         let opt_entry = stash.entry(cap_ref.retain()).or_insert_with(|| {
                             let (tree, f_hist) = data.pop().expect("First tree/histogram set");
-                            Some((tree, Serializable::from_serializable(f_hist)))
+                            Some((tree, f_hist.into()))
                         });
 
                         let (tree, histogram_set) = opt_entry.as_mut().unwrap();
                         for (new_tree, new_histogram_set) in data.drain(..) {
                             // make sure all trees in this timestamp are the same
                             assert_eq!(*tree, new_tree);
-                            histogram_set.merge(Serializable::from_serializable(new_histogram_set));
+                            histogram_set.merge(new_histogram_set.into());
                         }
                     });
 
@@ -182,9 +182,7 @@ where
                                 cap, worker
                             );
                             let (tree, merged_set) = stash_entry.take().unwrap();
-                            output
-                                .session(cap)
-                                .give((tree.clone(), merged_set.into_serializable()));
+                            output.session(cap).give((tree.clone(), merged_set.into()));
                         }
                     }
 

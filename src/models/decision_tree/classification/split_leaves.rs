@@ -1,4 +1,3 @@
-use data::serialization::Serializable;
 use models::decision_tree::classification::histogram::FeatureValueHistogramSet;
 use models::decision_tree::histogram_generics::*;
 use models::decision_tree::operators::SplitLeaves;
@@ -10,20 +9,20 @@ use timely::dataflow::{Scope, Stream};
 use timely::progress::nested::product::Product;
 use timely::progress::Timestamp;
 
-/// Convenience type for a combination of:
-/// (decision tree, histogram set for the tree, number of attributes in the dataset)
-pub type TreeWithHistograms<T, L> = (
-    DecisionTree<T, L>,
-    <FeatureValueHistogramSet<T, L> as Serializable>::Serializable,
-);
-
 impl<
         S: Scope<Timestamp = Product<Ts1, u64>>,
         Ts1: Timestamp,
         T: ContinuousValue,
         L: DiscreteValue,
         I: Clone + SplitImprovement<T, L, HistogramData = FeatureValueHistogramSet<T, L>> + 'static,
-    > SplitLeaves<T, L, S, I> for Stream<S, TreeWithHistograms<T, L>>
+    > SplitLeaves<T, L, S, I>
+    for Stream<
+        S,
+        (
+            DecisionTree<T, L>,
+            <FeatureValueHistogramSet<T, L> as HistogramSetItem>::Serializable,
+        ),
+    >
 {
     fn split_leaves(
         &self,
@@ -36,8 +35,7 @@ impl<
                 let improvement_algo = improvement_algo.clone();
                 input.for_each(move |time, data| {
                     for (mut tree, histograms) in data.drain(..) {
-                        let mut histograms: FeatureValueHistogramSet<_, _> =
-                            Serializable::from_serializable(histograms);
+                        let mut histograms: FeatureValueHistogramSet<_, _> = histograms.into();
 
                         let current_iteration = time.inner;
                         let mut split_leaves = 0;
@@ -47,7 +45,7 @@ impl<
                                 .iter()
                                 // ignores leaves where no data points arrive
                                 .filter_map(|leaf| Some((leaf, histograms.get(&leaf)?)))
-                                .map(|(leaf, node_histograms)| {
+                                .for_each(|(leaf, node_histograms)| {
                                     let (split_attr, (delta, split_location)) = node_histograms
                                         .iter()
                                         .map(|(attr, attr_histograms)| {

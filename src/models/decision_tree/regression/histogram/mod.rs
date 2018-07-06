@@ -1,6 +1,5 @@
 use data::TrainingData;
 use self::loss_functions::*;
-use data::serialization::Serializable;
 use models::decision_tree::histogram_generics::*;
 use models::decision_tree::tree::{DecisionTree, Rule, NodeIndex, Node};
 use num_traits::Float;
@@ -13,11 +12,8 @@ use std::ops::Bound::{Excluded, Included, Unbounded};
 
 pub mod loss_functions;
 pub mod operators;
-
-/// Nested set of histograms that contains
-/// Node -> Attribute Index -> Feature Value -> Histogram with target values
-pub type TargetValueHistogramSet<T, L> =
-    BTreeHistogramSet<NodeIndex, VecHistogramSet<FnvHistogramSet<T, Histogram<L>>>>;
+mod target_value_set;
+pub use self::target_value_set::*;
 
 pub trait FindSplits<T, L: Float, Lf: WeightedLoss<L>> {
     fn find_best_splits(&self, nodes: &[NodeIndex], loss_func: &Lf) -> Vec<(NodeIndex, Rule<T>)>;
@@ -133,6 +129,12 @@ pub struct Histogram<L: Float> {
     n_bins: usize,
 }
 
+#[derive(Clone, Abomonation)]
+pub struct SerializableHistogram<L>{
+    n_bins: usize,
+    bins: Vec<(L, L, BinData<L>)>
+}
+
 impl<L: ContinuousValue> BaseHistogram<L> for Histogram<L> {
     type Bin = (BinAddress<L>, BinData<L>);
 
@@ -178,10 +180,11 @@ impl<L: ContinuousValue> BaseHistogram<L> for Histogram<L> {
     fn count(&self) -> u64 {
         self.bins.iter().fold(0, |sum, (_, d)| sum + d.count)
     }
+}
 
+impl<L: ContinuousValue> Median<L> for Histogram<L> {
     fn median(&self) -> Option<L> {
         let mut count_target = self.count() / 2;
-        debug!("Median target count: {}", count_target);
         let (bin_addr, bin_data) = self
             .bins
             .iter()
@@ -192,7 +195,6 @@ impl<L: ContinuousValue> BaseHistogram<L> for Histogram<L> {
                 } else  { false }
             })
             .next()?;
-        debug!("Median bin/addr: {:?} -> {:?}", bin_addr, bin_data);
         let ratio = L::from(count_target).unwrap() / L::from(bin_data.count).unwrap();
         let l = bin_addr.left.into_inner();
         let r = bin_addr.right.into_inner();
@@ -200,25 +202,24 @@ impl<L: ContinuousValue> BaseHistogram<L> for Histogram<L> {
     }
 }
 
-impl<L: ContinuousValue> Serializable for Histogram<L> {
-    /// Serializable representation of this histogram set
-    type Serializable = (usize, Vec<(L, L, BinData<L>)>);
-
+impl<L: ContinuousValue> From<Histogram<L>> for SerializableHistogram<L> {
     /// Turn this item into a serializable version of itself
-    fn into_serializable(self) -> Self::Serializable {
-        let n_bins = self.n_bins;
-        let bins = self
+    fn from(hist: Histogram<L>) -> Self {
+        let n_bins = hist.n_bins;
+        let bins = hist
             .bins
             .into_iter()
             .map(|(address, data)| (address.left.into_inner(), address.right.into_inner(), data))
             .collect();
-        (n_bins, bins)
+        SerializableHistogram { n_bins, bins }
     }
+}
 
+impl<L: ContinuousValue> Into<Histogram<L>> for SerializableHistogram<L> {
     /// Recover a item from its serializable representation
-    fn from_serializable(serializable: Self::Serializable) -> Self {
-        let mut histogram = Histogram::new(serializable.0);
-        for (left, right, data) in serializable.1 {
+    fn into(self) -> Histogram<L> {
+        let mut histogram = Histogram::new(self.n_bins);
+        for (left, right, data) in self.bins {
             histogram
                 .bins
                 .insert(BinAddress::new(left.into(), right.into()), data);
@@ -229,6 +230,8 @@ impl<L: ContinuousValue> Serializable for Histogram<L> {
 }
 
 impl<L: ContinuousValue> HistogramSetItem for Histogram<L> {
+    type Serializable = SerializableHistogram<L>;
+    
     /// Merge another instance of this type into this histogram
     fn merge(&mut self, other: Self) {
         for (new_addr, new_data) in other.bins {
@@ -533,7 +536,7 @@ mod test {
 impl<'a, T: DiscreteValue, L: ContinuousValue> FromData<DecisionTree<T, L>, TrainingData<T, L>>
     for TargetValueHistogramSet<T, L>
 {
-    fn from_data(tree: DecisionTree<T, L>, data: &[TrainingData<T, L>], bins: usize) -> Self {
+    fn from_data(tree: &DecisionTree<T, L>, data: &[TrainingData<T, L>], bins: usize) -> Self {
         let mut histograms = Self::default();
 
         for training_data in data {
