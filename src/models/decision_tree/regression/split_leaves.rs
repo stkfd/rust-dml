@@ -35,7 +35,6 @@ impl<S, Ts1, T, L, I> SplitLeaves<T, L, S, I>
         &self,
         levels: u64,
         loss_func: I,
-        bins: u64,
     ) -> Stream<S, (usize, DecisionTree<T, L>)> {
         self.unary(Pipeline, "BuildTree", |_, _| {
             move |input, output| {

@@ -130,7 +130,6 @@ pub trait SplitLeaves<T, L, S: Scope, I> {
         &self,
         levels: u64,
         improvement_algo: I,
-        bins: u64,
     ) -> Stream<S, (usize, DecisionTree<T, L>)>;
 }
 

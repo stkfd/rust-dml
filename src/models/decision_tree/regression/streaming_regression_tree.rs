@@ -116,7 +116,7 @@ where
                     };
 
                     let (loop_handle, cycle) = tree_iter_scope.loop_variable(self.levels, 1);
-                    let histograms_and_trees = init_tree
+                    let (iterate, finished_tree) = init_tree
                         .to_stream(tree_iter_scope)
                         .concat(&cycle)
                         .inspect(|x| info!("Begin tree iteration: {:?}", x))
@@ -126,19 +126,14 @@ where
                             self.bins,
                             self.points_per_worker as usize,
                         )
-                        .aggregate_histograms::<TargetValueHistogramSet<T, L>>();
-
-                    let (iterate, finished_tree) = histograms_and_trees
-                        .split_leaves(
-                            self.levels,
-                            TrimmedLadWeightedLoss(self.trim_ratio),
-                            self.bins as u64,
-                        )
+                        .aggregate_histograms::<TargetValueHistogramSet<T, L>>()
+                        .split_leaves(self.levels, TrimmedLadWeightedLoss(self.trim_ratio))
                         .map(move |(split_leaves, tree)| {
                             info!("Split {} leaves", split_leaves);
                             tree
                         })
                         .branch(move |time, _| time.inner >= levels);
+                    
                     iterate.connect_loop(loop_handle);
                     finished_tree.leave()
                 })

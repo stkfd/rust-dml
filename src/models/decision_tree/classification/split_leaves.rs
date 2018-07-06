@@ -28,7 +28,6 @@ impl<
         &self,
         levels: u64,
         improvement_algo: I,
-        bins: u64,
     ) -> Stream<S, (usize, DecisionTree<T, L>)> {
         self.unary(Pipeline, "BuildTree", |_, _| {
             move |input, output| {
