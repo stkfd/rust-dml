@@ -1,6 +1,7 @@
 //! Extension traits and other tools to deal with dataflow Streams.
 
 use data::TrainingData;
+use failure::Error;
 use fnv::FnvHashMap;
 use std::sync::mpsc;
 use timely::dataflow::channels::pact::Pipeline;
@@ -10,13 +11,12 @@ use timely::dataflow::{Scope, Stream};
 use timely::progress::nested::product::Product;
 use timely::progress::Timestamp;
 use timely::Data;
-use Result;
 
-mod branch;
+mod apply_latest;
 mod exchange_evenly;
 mod random;
 
-pub use self::branch::{Branch, BranchWhen};
+pub use self::apply_latest::ApplyLatest;
 pub use self::exchange_evenly::ExchangeEvenly;
 
 /// A container for result data coming in asynchronously from somewhere. Internally uses the `std::sync::mpsc`
@@ -33,7 +33,7 @@ impl<T> AsyncResult<T> {
     /// for the data from the channel.
     /// Does nothing if the data was already retrieved, returns an error if the Result is uninitialized
     /// and does not yet contain a `Receiver`.
-    pub fn fetch(&mut self) -> Result<()> {
+    pub fn fetch(&mut self) -> Result<(), Error> {
         *self = match *self {
             AsyncResult::Receiver(ref receiver) => {
                 let data = receiver.recv()?;
@@ -50,7 +50,7 @@ impl<T> AsyncResult<T> {
     }
 
     /// Tries to get the data using `fetch` and returns a reference to it if successful
-    pub fn get(&mut self) -> Result<&T> {
+    pub fn get(&mut self) -> Result<&T, Error> {
         self.fetch()?;
         Ok(self.get_unchecked())
     }
@@ -64,7 +64,7 @@ impl<T> AsyncResult<T> {
     }
 
     /// Tries to get the data using `fetch` and returns it if successful
-    pub fn take(mut self) -> Result<T> {
+    pub fn take(mut self) -> Result<T, Error> {
         self.fetch()?;
         Ok(self.take_unchecked())
     }
