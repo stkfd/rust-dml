@@ -1,5 +1,6 @@
 //! The K-Means Clustering Algorithm.
 
+use failure::Error;
 use self::aggregator::*;
 use data::dataflow::AsyncResult;
 use data::providers::IntSliceIndex;
@@ -22,7 +23,6 @@ use timely::progress::Timestamp;
 use timely::{
     dataflow::{operators::*, Scope, Stream}, progress::nested::product::Product, Data, ExchangeData,
 };
-use Result;
 
 pub use self::initializers::KMeansInitializer;
 
@@ -76,7 +76,7 @@ where
         &mut self,
         scope: &mut S,
         inputs: Sp,
-    ) -> Result<Stream<S, AbomonableArray2<usize>>> {
+    ) -> Result<Stream<S, AbomonableArray2<usize>>, Error> {
         if scope.index() != 0 {
             return Ok(vec![].to_stream(scope));
         }
@@ -144,7 +144,7 @@ where
         &mut self,
         scope: &mut S,
         input_spec: D,
-    ) -> Result<Stream<S, AbomonableArray2<Item>>> {
+    ) -> Result<Stream<S, AbomonableArray2<Item>>, Error> {
         let n_clusters = self.n_clusters;
         let cols = self.cols;
 

@@ -1,27 +1,28 @@
-use data::dataflow::{Branch, ExchangeEvenly, SegmentTrainingData};
+use models::decision_tree::tree::DecisionTreeError;
+use std::marker::PhantomData;
+use data::dataflow::ApplyLatest;
 use data::serialization::*;
 use data::TrainingData;
-use fnv::FnvHashMap;
 use models::decision_tree::histogram_generics::{ContinuousValue, DiscreteValue};
 use models::decision_tree::operators::{AggregateHistograms, CreateHistograms, SplitLeaves};
 use models::decision_tree::regression::histogram::loss_functions::TrimmedLadWeightedLoss;
 use models::decision_tree::regression::histogram::TargetValueHistogramSet;
 use models::decision_tree::tree::DecisionTree;
-use models::StreamingSupModel;
-use timely::dataflow::channels::pact::Pipeline;
+use models::*;
 use timely::dataflow::operators::*;
 use timely::dataflow::{Scope, Stream};
 use timely::ExchangeData;
-use Result;
 
-pub struct StreamingRegressionTree<L> {
+#[derive(Clone, Abomonation, Debug)]
+pub struct StreamingRegressionTree<T, L> {
     levels: u64,
     points_per_worker: u64,
     bins: usize,
     trim_ratio: L,
+    _t: PhantomData<T>,
 }
 
-impl<L> StreamingRegressionTree<L> {
+impl<T, L> StreamingRegressionTree<T, L> {
     /// Creates a new model instance
     pub fn new(levels: u64, points_per_worker: u64, bins: usize, trim_ratio: L) -> Self {
         StreamingRegressionTree {
@@ -29,116 +30,75 @@ impl<L> StreamingRegressionTree<L> {
             points_per_worker,
             bins,
             trim_ratio,
+            _t: PhantomData,
         }
     }
 }
 
-impl<T, L>
-    StreamingSupModel<
-        TrainingData<T, L>,
-        AbomonableArray2<T>,
-        AbomonableArray1<L>,
-        DecisionTree<T, L>,
-    > for StreamingRegressionTree<L>
-where
-    T: DiscreteValue + ExchangeData,
-    L: ContinuousValue + ExchangeData,
+impl<T: Data, L: Data> ModelAttributes for StreamingRegressionTree<T, L> {
+    type LabeledSamples = TrainingData<T, L>;
+    type UnlabeledSamples = AbomonableArray2<T>;
+    type Predictions = AbomonableArray1<L>;
+    type TrainingResult = DecisionTree<T, L>;
+}
+
+impl<S: Scope, T: DiscreteValue, L: ContinuousValue> Train<S, StreamingRegressionTree<T, L>>
+    for Stream<S, TrainingData<T, L>>
 {
-    /// Predict output from inputs. Waits until a decision tree has been received before processing
-    /// any data coming in on the stream of samples. When a tree has been received, all sample data
-    /// is immediately processed using the latest received decision tree.
-    fn predict<S: Scope>(
-        &mut self,
-        training_results: Stream<S, DecisionTree<T, L>>,
-        inputs: Stream<S, AbomonableArray2<T>>,
-    ) -> Result<Stream<S, AbomonableArray1<L>>> {
-        let predictions =
-            training_results.binary(&inputs, Pipeline, Pipeline, "Predict", |_, _| {
-                let mut current_tree = None;
-                let mut input_stash = FnvHashMap::default();
+    fn train(
+        &self,
+        model: &StreamingRegressionTree<T, L>,
+    ) -> Stream<S, DecisionTree<T, L>> {
+        let mut scope = self.scope();
+        let levels = model.levels;
 
-                move |trees, inputs, output| {
-                    trees.for_each(|_, data| {
-                        current_tree = Some(data.drain(..).last().expect("Latest decision tree"));
-                    });
-                    inputs.for_each(|time, data| {
-                        if let Some(tree) = &current_tree {
-                            for samples in data.drain(..) {
-                                let samples = samples.view();
-                                output
-                                    .session(&time)
-                                    .give(AbomonableArray1::from(tree.predict_samples(samples)));
-                            }
-                        } else {
-                            input_stash
-                                .entry(time.retain())
-                                .or_insert_with(Vec::new)
-                                .extend(data.drain(..));
-                        }
-                    });
+        scope.scoped::<u64, _, _>(|tree_iter_scope| {
+            let init_tree = if tree_iter_scope.index() == 0 {
+                vec![DecisionTree::<T, L>::default()]
+            } else {
+                vec![]
+            };
 
-                    if let Some(tree) = &current_tree {
-                        for (time, data) in &mut input_stash {
-                            for samples in data.drain(..) {
-                                let samples = samples.view();
-                                output
-                                    .session(&time)
-                                    .give(AbomonableArray1::from(tree.predict_samples(samples)));
-                            }
-                        }
-                    }
-                    input_stash.retain(|_, data| !data.is_empty());
-                }
-            });
-        Ok(predictions)
-    }
-
-    /// Train the model using inputs and targets.
-    fn train<S: Scope>(
-        &mut self,
-        scope: &mut S,
-        data: Stream<S, TrainingData<T, L>>,
-    ) -> Result<Stream<S, DecisionTree<T, L>>> {
-        let levels = self.levels;
-
-        let results = scope.scoped::<u64, _, _>(|data_segments_scope| {
-            let training_data = data
-                .enter(data_segments_scope)
-                .segment_training_data(data_segments_scope.peers() as u64 * self.points_per_worker)
-                .exchange_evenly();
-
-            data_segments_scope
-                .scoped::<u64, _, _>(|tree_iter_scope| {
-                    let init_tree = if tree_iter_scope.index() == 0 {
-                        vec![DecisionTree::<T, L>::default()]
-                    } else {
-                        vec![]
-                    };
-
-                    let (loop_handle, cycle) = tree_iter_scope.loop_variable(self.levels, 1);
-                    let (iterate, finished_tree) = init_tree
-                        .to_stream(tree_iter_scope)
-                        .concat(&cycle)
-                        .inspect(|x| info!("Begin tree iteration: {:?}", x))
-                        .broadcast()
-                        .create_histograms::<TargetValueHistogramSet<T, L>>(
-                            &training_data.enter(tree_iter_scope),
-                            self.bins,
-                            self.points_per_worker as usize,
-                        )
-                        .aggregate_histograms::<TargetValueHistogramSet<T, L>>()
-                        .split_leaves(self.levels, TrimmedLadWeightedLoss(self.trim_ratio))
-                        .map(move |(split_leaves, tree)| {
-                            info!("Split {} leaves", split_leaves);
-                            tree
-                        })
-                        .branch(move |time, _| time.inner >= levels);
-                    
-                    iterate.connect_loop(loop_handle);
-                    finished_tree.leave()
+            let (loop_handle, cycle) = tree_iter_scope.loop_variable(model.levels, 1);
+            let (iterate, finished_tree) = init_tree
+                .to_stream(tree_iter_scope)
+                .concat(&cycle)
+                .inspect(|x| info!("Begin tree iteration: {:?}", x))
+                .broadcast()
+                .create_histograms::<TargetValueHistogramSet<T, L>>(
+                    &self.enter(tree_iter_scope),
+                    model.bins,
+                    model.points_per_worker as usize,
+                )
+                .aggregate_histograms::<TargetValueHistogramSet<T, L>>()
+                .split_leaves(model.levels, TrimmedLadWeightedLoss(model.trim_ratio))
+                .map(move |(split_leaves, tree)| {
+                    info!("Split {} leaves", split_leaves);
+                    tree
                 })
-                .leave()
-        });
-        Ok(results)
+                .branch(move |time, _| time.inner >= levels);
+
+            iterate.connect_loop(loop_handle);
+            finished_tree.leave()
+        })
+    }
+}
+
+impl<S, T, L>
+    Predict<S, StreamingRegressionTree<T, L>, DecisionTreeError>
+    for Stream<S, AbomonableArray2<T>>
+where
+    S: Scope,
+    T: ExchangeData + DiscreteValue,
+    L: ExchangeData + ContinuousValue,
+{
+    fn predict(
+        &self,
+        _model: &StreamingRegressionTree<T, L>,
+        train_results: Stream<S, DecisionTree<T, L>>,
+    ) -> Stream<S, Result<AbomonableArray1<L>, ModelError<DecisionTreeError>>> {
+        train_results.apply_latest(self, |_time, tree, samples| {
+            tree.predict_samples(&samples)
+        })
     }
 }

@@ -1,9 +1,9 @@
+use failure::Error;
 use data::providers::{DataSource, DataSourceSpec, IntSliceIndex};
 use data::serialization::*;
 use ndarray::prelude::*;
 use std::convert::TryFrom;
 use timely::Data;
-use Result;
 
 /// Creates a data provider from a two-dimensional array.
 /// Mainly used for testing and examples.
@@ -27,7 +27,7 @@ impl<T: Data + Copy> DataSourceSpec<AbomonableArray2<T>> for ArrayProviderSpec<T
 impl<T: Data> TryFrom<ArrayProviderSpec<T>> for ArrayProvider<T> {
     type Error = ::failure::Error;
 
-    fn try_from(from: ArrayProviderSpec<T>) -> Result<Self> {
+    fn try_from(from: ArrayProviderSpec<T>) -> Result<Self, Self::Error> {
         Ok(ArrayProvider {
             array: from.array.into(),
         })
@@ -42,21 +42,21 @@ pub struct ArrayProvider<T: Data> {
 
 impl<T: Data + Copy> DataSource<AbomonableArray2<T>> for ArrayProvider<T> {
     /// Fetch a partition of the items in this `DataSource`
-    fn slice(&mut self, idx: IntSliceIndex<usize>) -> Result<AbomonableArray2<T>> {
+    fn slice(&mut self, idx: IntSliceIndex<usize>) -> Result<AbomonableArray2<T>, Error> {
         Ok(self.array
             .slice(s![idx.start..(idx.start + idx.length), ..])
             .to_owned()
             .into())
     }
 
-    fn all(&mut self) -> Result<AbomonableArray2<T>> {
+    fn all(&mut self) -> Result<AbomonableArray2<T>, Error> {
         Ok(self.array
             .to_owned()
             .into())
     }
 
     /// Select specific rows from the data source
-    fn select(&mut self, indices: &[usize]) -> Result<AbomonableArray2<T>> {
+    fn select(&mut self, indices: &[usize]) -> Result<AbomonableArray2<T>, Error> {
         Ok(self.array.select(Axis(0), indices).into())
     }
 
@@ -64,7 +64,7 @@ impl<T: Data + Copy> DataSource<AbomonableArray2<T>> for ArrayProvider<T> {
     fn chunk_indices(
         &mut self,
         chunk_length: usize,
-    ) -> Result<Box<Iterator<Item = IntSliceIndex<usize>>>> {
+    ) -> Result<Box<Iterator<Item = IntSliceIndex<usize>>>, Error> {
         let len = self.array.len_of(Axis(0));
         let num_chunks = ((len as f64) / (chunk_length as f64)).ceil() as usize;
 
@@ -79,7 +79,7 @@ impl<T: Data + Copy> DataSource<AbomonableArray2<T>> for ArrayProvider<T> {
     }
 
     /// Total number of available items
-    fn count(&mut self) -> Result<usize> {
+    fn count(&mut self) -> Result<usize, Error> {
         Ok(self.array.len_of(Axis(0)))
     }
 }

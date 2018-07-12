@@ -1,4 +1,4 @@
-#![feature(try_from)]
+#![feature(try_from, generic_associated_types)]
 
 extern crate abomonation;
 #[macro_use]
@@ -28,12 +28,8 @@ extern crate vec_map;
 #[macro_use]
 extern crate derive_more;
 
-use std::result::Result as StdResult;
-
 pub mod data;
 pub mod models;
-
-type Result<T> = StdResult<T, ::failure::Error>;
 
 #[cfg(test)]
 mod tests;

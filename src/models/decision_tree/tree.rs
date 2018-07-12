@@ -3,10 +3,19 @@
 
 #![allow(dead_code)]
 
+use data::serialization::*;
+use models::ModelError;
+use models::PredictSamples;
 use ndarray::prelude::*;
 use ndarray::Zip;
 use std::cmp::Ordering;
 use std::ops::{Index, IndexMut};
+
+#[derive(Fail, Debug, Abomonation, Clone)]
+pub enum DecisionTreeError {
+    #[fail(display = "Tried to predict a value, but the decision tree ended on an unlabeled node")]
+    EndedOnUnlabeled,
+}
 
 #[derive(Abomonation, Debug, Clone, Eq, Hash, PartialEq)]
 pub struct DecisionTree<T, L> {
@@ -75,19 +84,43 @@ impl<T, L> DecisionTree<T, L> {
     }
 }
 
-impl<T: PartialOrd, L: Copy> DecisionTree<T, L> {
-    pub fn predict_samples(&self, samples: ArrayView2<T>) -> Array1<L> {
+impl<'a, T, L, I> PredictSamples<I, AbomonableArray1<L>, DecisionTreeError> for DecisionTree<T, L>
+where
+    T: PartialOrd + 'a,
+    L: Copy + 'a,
+    I: Into<ArrayView2<'a, T>>,
+    I: 'a,
+{
+    fn predict_samples(
+        &self,
+        samples: I,
+    ) -> Result<AbomonableArray1<L>, ModelError<DecisionTreeError>> {
+        let samples: ArrayView2<T> = samples.into();
         let mut labels = unsafe { Array1::uninitialized(samples.rows()) };
 
+        // since we can't return an error from inside the `apply` closure, error
+        // handling is somewhat unusual here. If an error occurs, some values in the array
+        // remain uninitialized memory, so the incomplete array can't be returned
+        let mut fail = false;
         Zip::from(&mut labels)
             .and(samples.outer_iter())
             .apply(|label, sample| {
-                *label = *self.descend(sample).expect("Get point label");
+                if let Some(l) = self.descend(sample) {
+                    *label = *l;
+                } else {
+                    fail = true;
+                }
             });
-        
-        labels
-    }
 
+        if fail {
+            Err(ModelError::PredictionFailed(DecisionTreeError::EndedOnUnlabeled))
+        } else {
+            Ok(labels.into())
+        }
+    }
+}
+
+impl<T: PartialOrd, L: Copy> DecisionTree<T, L> {
     pub fn descend<'a, 'b: 'a>(&'b self, value: ArrayView1<'a, T>) -> Option<&L> {
         self.descend_iter(value)
             .filter_map(|node_id| match &self[node_id] {
@@ -179,21 +212,25 @@ pub enum InnerRule<T> {
 
 impl<T: PartialOrd> Rule<T> {
     pub fn threshold(feature: usize, threshold: T) -> Self {
-        Rule { feature, inner: InnerRule::Threshold(threshold) }
+        Rule {
+            feature,
+            inner: InnerRule::Threshold(threshold),
+        }
     }
 
     pub fn subset(feature: usize, subset: Vec<T>) -> Self {
-        Rule { feature, inner: InnerRule::Subset(subset) }
+        Rule {
+            feature,
+            inner: InnerRule::Subset(subset),
+        }
     }
 
     pub fn match_value(&self, value: &T) -> Option<MatchResult> {
         match self.inner {
-            InnerRule::Threshold(ref threshold) => {
-                match value.partial_cmp(threshold) {
-                    Some(Ordering::Less) => Some(MatchResult::Left),
-                    Some(Ordering::Greater) | Some(Ordering::Equal) => Some(MatchResult::Right),
-                    None => None,
-                }
+            InnerRule::Threshold(ref threshold) => match value.partial_cmp(threshold) {
+                Some(Ordering::Less) => Some(MatchResult::Left),
+                Some(Ordering::Greater) | Some(Ordering::Equal) => Some(MatchResult::Right),
+                None => None,
             },
             InnerRule::Subset(ref subset) => {
                 if subset.contains(value) {
@@ -214,13 +251,11 @@ pub enum MatchResult {
 impl<T: PartialOrd, L> Node<T, L> {
     pub fn descend(&self, value: &ArrayView1<T>) -> Option<NodeIndex> {
         match *self {
-            Node::Inner { ref rule, l, r, .. } => {
-                match rule.match_value(&value[rule.feature]) {
-                    Some(MatchResult::Left) => Some(l),
-                    Some(MatchResult::Right) => Some(r),
-                    None => None,
-                }
-            }
+            Node::Inner { ref rule, l, r, .. } => match rule.match_value(&value[rule.feature]) {
+                Some(MatchResult::Left) => Some(l),
+                Some(MatchResult::Right) => Some(r),
+                None => None,
+            },
             Node::Leaf { .. } => None,
         }
     }
@@ -238,21 +273,9 @@ mod test {
 
         let mut tree = DecisionTree::default();
         let root = tree.root();
-        let (not_red, red) = tree.split(
-            root,
-            Rule::threshold(0, 1),
-            None
-        );
-        let (red_and_not_green, red_green) = tree.split(
-            red,
-            Rule::threshold(1, 1),
-            None
-        );
-        let (pure_red, _) = tree.split(
-            red_and_not_green,
-            Rule::threshold(2, 1),
-            None
-        );
+        let (not_red, red) = tree.split(root, Rule::threshold(0, 1), None);
+        let (red_and_not_green, red_green) = tree.split(red, Rule::threshold(1, 1), None);
+        let (pure_red, _) = tree.split(red_and_not_green, Rule::threshold(2, 1), None);
         tree.label(pure_red, "Pure Red");
 
         assert_eq!(

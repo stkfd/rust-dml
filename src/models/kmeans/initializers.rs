@@ -1,3 +1,4 @@
+use failure::Error;
 use data::providers::DataSource;
 use data::serialization::*;
 use ndarray::prelude::*;
@@ -6,14 +7,13 @@ use ndarray_linalg::{RealScalar};
 use rand::Rng;
 use std::ops::{Mul, Sub};
 use timely::Data;
-use Result;
 
 pub trait KMeansInitializer<T: Data> {
     fn select_initial_centroids<D: DataSource<AbomonableArray2<T>>>(
         data: &mut D,
         n_centroids: usize,
         cols: usize,
-    ) -> Result<AbomonableArray2<T>>;
+    ) -> Result<AbomonableArray2<T>, Error>;
 }
 
 pub struct RandomSample {}
@@ -23,7 +23,7 @@ impl<T: Data> KMeansInitializer<T> for RandomSample {
         data: &mut D,
         n_centroids: usize,
         _cols: usize,
-    ) -> Result<AbomonableArray2<T>> {
+    ) -> Result<AbomonableArray2<T>, Error> {
         let count = data.count()?;
         let mut rng = ::rand::thread_rng();
 
@@ -42,7 +42,7 @@ impl<T: Data + RealScalar + Sub<T> + Mul<T>> KMeansInitializer<T> for KMeansPlus
         data: &mut D,
         n_centroids: usize,
         cols: usize,
-    ) -> Result<AbomonableArray2<T>> {
+    ) -> Result<AbomonableArray2<T>, Error> {
         let count = data.count()?;
         let mut rng = ::rand::thread_rng();
 

@@ -6,11 +6,14 @@ extern crate timely;
 extern crate timely_communication;
 
 use flexi_logger::Logger;
-use ml_dataflow::data::serialization::{AbomonableArray, AsView};
+use ml_dataflow::data::{
+    dataflow::{ExchangeEvenly, SegmentTrainingData},
+    serialization::{AbomonableArray, AsView},
+    TrainingData,
+};
 use ml_dataflow::models::decision_tree::classification::impurity::Gini;
 use ml_dataflow::models::decision_tree::classification::*;
-use ml_dataflow::models::StreamingSupModel;
-use ml_dataflow::data::TrainingData;
+use ml_dataflow::models::*;
 use ndarray::prelude::*;
 use timely::dataflow::operators::*;
 use timely_communication::initialize::Configuration;
@@ -35,9 +38,10 @@ fn main() {
 
         let y: Array1<usize> = arr1(&[0, 0, 2, 2, 1, 1, 1, 1, 3, 3]);
 
-        let mut model = StreamingClassificationTree::new(5, 500_000, 5, Gini);
+        let points_per_worker = 500_000;
+        let model = StreamingClassificationTree::new(5, points_per_worker, 5, Gini);
 
-        root.dataflow::<usize, _, _>(|scope| {
+        root.dataflow::<u64, _, _>(|scope| {
             let training_stream = vec![
                 TrainingData {
                     x: x.clone().into(),
@@ -47,18 +51,18 @@ fn main() {
                     x: x.clone().into(),
                     y: y.clone().into(),
                 },
-            ].to_stream(scope);
-            let trees = model
-                .train(scope, training_stream)
-                .expect("Training model")
+            ].to_stream(scope)
+                .segment_training_data(points_per_worker * scope.peers() as u64)
+                .exchange_evenly();
+
+            let trees = training_stream
+                .train(&model)
                 .inspect(|x| println!("Results: {:?}", x));
-            model
-                .predict(
-                    trees,
-                    vec![AbomonableArray::from(x.clone())].to_stream(scope),
-                )
-                .unwrap()
-                .inspect(|d| println!("{}", d.view()));
+
+            vec![AbomonableArray::from(x.clone())]
+                .to_stream(scope)
+                .predict(&model, trees)
+                .inspect(|d| println!("{}", d.as_ref().unwrap().view()));
         });
         while root.step() {}
     }).expect("Execute dataflow");

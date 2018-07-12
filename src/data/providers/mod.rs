@@ -1,8 +1,8 @@
+use failure::Error;
 use data::serialization::*;
 use num_traits::PrimInt;
 use std::convert::TryFrom;
 use timely::{Data, ExchangeData};
-use Result;
 
 pub mod operators;
 pub mod csv;
@@ -34,33 +34,33 @@ impl <T: Data> IndexableData for Vec<T> {
 pub trait DataSourceSpec<Collection: IndexableData>: Data {
     type Provider: TryFrom<Self, Error = ::failure::Error> + DataSource<Collection>;
 
-    fn to_provider(&self) -> Result<Self::Provider> {
+    fn to_provider(&self) -> Result<Self::Provider, Error> {
         <Self::Provider>::try_from(self.clone())
     }
 
-    fn into_provider(self) -> Result<Self::Provider> {
+    fn into_provider(self) -> Result<Self::Provider, Error> {
         <Self::Provider>::try_from(self)
     }
 }
 
 pub trait DataSource<Collection: IndexableData> {
     /// Fetch a partition of the items in this `DataSource`
-    fn slice(&mut self, idx: Collection::SliceIndex) -> Result<Collection>;
+    fn slice(&mut self, idx: Collection::SliceIndex) -> Result<Collection, Error>;
 
     /// Fetch the complete contents of the data source
-    fn all(&mut self) -> Result<Collection>;
+    fn all(&mut self) -> Result<Collection, Error>;
 
     /// Select specific rows from the data source
-    fn select(&mut self, indices: &[<Collection::SliceIndex as IndexesSlice>::Idx]) -> Result<Collection>;
+    fn select(&mut self, indices: &[<Collection::SliceIndex as IndexesSlice>::Idx]) -> Result<Collection, Error>;
 
     /// Iterate over indices to all the item chunks of the given size in this `DataSource`
     fn chunk_indices(
         &mut self,
         chunk_length: usize,
-    ) -> Result<Box<Iterator<Item = Collection::SliceIndex>>>;
+    ) -> Result<Box<Iterator<Item = Collection::SliceIndex>>, Error>;
 
     /// Total number of available items
-    fn count(&mut self) -> Result<usize>;
+    fn count(&mut self) -> Result<usize, Error>;
 }
 
 pub trait IndexesSlice {

@@ -1,38 +1,39 @@
 use data::providers::{DataSourceSpec, IndexableData};
+use failure::{Error, Fail};
 use timely::dataflow::{Scope, Stream};
-use Result;
+use timely::Data;
 
-pub mod kmeans;
 pub mod decision_tree;
+pub mod gradient_boost;
+pub mod kmeans;
 
-//pub trait SupModel<T, U> {
-//    /// Predict output from inputs.
-//    fn predict<S: Scope, Source: DataSourceSpec<Inputs>>(&mut self, scope: &mut S, inputs: Source) -> Result<Stream<S, Predictions>>;
-//
-//    /// Train the model using inputs and targets.
-//    fn train(&mut self, inputs: &T, targets: &U) -> Result<()>;
-//}
+#[derive(Fail, Debug, Abomonation, Clone)]
+pub enum ModelError<Inner: Data + Fail> {
+    #[fail(display = "Prediction failed: {}", _0)]
+    PredictionFailed(#[cause] Inner),
+}
 
-pub trait StreamingSupModel<
-    TrainingInput,
-    PredictionInput,
-    Predictions,
-    TrainingOutput,
->
-{
-    /// Predict output from inputs.
-    fn predict<S: Scope>(
-        &mut self,
-        training_results: Stream<S, TrainingOutput>,
-        inputs: Stream<S, PredictionInput>,
-    ) -> Result<Stream<S, Predictions>>;
+pub trait ModelAttributes: Data {
+    type LabeledSamples: Data;
+    type UnlabeledSamples: Data;
+    type Predictions: Data;
+    type TrainingResult: Data;
+}
 
-    /// Train the model using inputs and targets.
-    fn train<S: Scope>(
-        &mut self,
-        scope: &mut S,
-        data: Stream<S, TrainingInput>,
-    ) -> Result<Stream<S, TrainingOutput>>;
+pub trait Train<S: Scope, M: ModelAttributes> {
+    fn train(&self, model: &M) -> Stream<S, M::TrainingResult>;
+}
+
+pub trait Predict<S: Scope, M: ModelAttributes, E: Data + Fail> {
+    fn predict(
+        &self,
+        model: &M,
+        train_result: Stream<S, M::TrainingResult>,
+    ) -> Stream<S, Result<M::Predictions, ModelError<E>>>;
+}
+
+pub trait PredictSamples<Samples, Predictions, E: Data + Fail> {
+    fn predict_samples(&self, input: Samples) -> Result<Predictions, ModelError<E>>;
 }
 
 pub trait UnSupModel<Inputs: IndexableData, Predictions, TrainingOutput> {
@@ -41,28 +42,12 @@ pub trait UnSupModel<Inputs: IndexableData, Predictions, TrainingOutput> {
         &mut self,
         scope: &mut S,
         inputs: Source,
-    ) -> Result<Stream<S, Predictions>>;
+    ) -> Result<Stream<S, Predictions>, Error>;
 
     /// Train the model using inputs.
     fn train<S: Scope, Source: DataSourceSpec<Inputs>>(
         &mut self,
         scope: &mut S,
         inputs: Source,
-    ) -> Result<Stream<S, TrainingOutput>>;
-}
-
-pub trait StreamingUnSupModel<Inputs: IndexableData, Predictions, TrainingOutput> {
-    /// Predict output from inputs.
-    fn predict<S: Scope>(
-        &mut self,
-        training_results: Stream<S, TrainingOutput>,
-        inputs: Stream<S, Inputs>,
-    ) -> Result<Stream<S, Predictions>>;
-
-    /// Train the model using inputs.
-    fn train<S: Scope>(
-        &mut self,
-        scope: &mut S,
-        inputs: Stream<S, Inputs>,
-    ) -> Result<Stream<S, TrainingOutput>>;
+    ) -> Result<Stream<S, TrainingOutput>, Error>;
 }

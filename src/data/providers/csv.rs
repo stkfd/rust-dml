@@ -1,3 +1,4 @@
+use failure::Error;
 use csv::{Reader as CsvReader, ReaderBuilder};
 use data::providers::{DataSource, DataSourceSpec, IntSliceIndex};
 use itertools::Itertools;
@@ -7,7 +8,6 @@ use std::fs::File;
 use std::io;
 use std::marker::PhantomData;
 use timely::Data;
-use Result;
 
 #[derive(Abomonation, Debug, Clone)]
 pub struct CsvFileProviderSpec {
@@ -18,7 +18,7 @@ pub struct CsvFileProviderSpec {
 impl TryFrom<CsvFileProviderSpec> for CsvProvider<File, CsvFileProviderSpec> {
     type Error = ::failure::Error;
 
-    fn try_from(spec: CsvFileProviderSpec) -> Result<Self> {
+    fn try_from(spec: CsvFileProviderSpec) -> Result<Self, Self::Error> {
         Ok(CsvProvider::from_spec(spec))
     }
 }
@@ -26,7 +26,7 @@ impl TryFrom<CsvFileProviderSpec> for CsvProvider<File, CsvFileProviderSpec> {
 impl TryInto<CsvReader<File>> for CsvFileProviderSpec {
     type Error = ::failure::Error;
 
-    fn try_into(self) -> Result<CsvReader<File>> {
+    fn try_into(self) -> Result<CsvReader<File>, Self::Error> {
         Ok(ReaderBuilder::new()
             .has_headers(self.options.has_headers)
             .delimiter(self.options.delimiter)
@@ -43,7 +43,7 @@ pub struct CsvStringProviderSpec {
 impl TryInto<CsvReader<io::Cursor<Vec<u8>>>> for CsvStringProviderSpec {
     type Error = ::failure::Error;
 
-    fn try_into(self) -> Result<CsvReader<io::Cursor<Vec<u8>>>> {
+    fn try_into(self) -> Result<CsvReader<io::Cursor<Vec<u8>>>, Self::Error> {
         Ok(ReaderBuilder::new()
             .has_headers(self.options.has_headers)
             .delimiter(self.options.delimiter)
@@ -60,7 +60,7 @@ impl CsvStringProviderSpec {
 impl TryFrom<CsvStringProviderSpec> for CsvProvider<io::Cursor<Vec<u8>>, CsvStringProviderSpec> {
     type Error = ::failure::Error;
 
-    fn try_from(spec: CsvStringProviderSpec) -> Result<Self> {
+    fn try_from(spec: CsvStringProviderSpec) -> Result<Self, Self::Error> {
         Ok(CsvProvider::from_spec(spec))
     }
 }
@@ -116,7 +116,7 @@ where
     for<'de> Row: Deserialize<'de>,
     Row: Data,
 {
-    fn slice(&mut self, idx: IntSliceIndex<usize>) -> Result<Vec<Row>> {
+    fn slice(&mut self, idx: IntSliceIndex<usize>) -> Result<Vec<Row>, Error> {
         let rows = self.builder
             .clone()
             .try_into()?
@@ -124,21 +124,21 @@ where
             .skip(idx.start)
             .take(idx.length)
             .map(|r| r.map_err(::failure::Error::from))
-            .collect::<Result<Vec<_>>>();
+            .collect::<Result<Vec<_>, _>>();
         Ok(rows?)
     }
 
-    fn all(&mut self) -> Result<Vec<Row>> {
+    fn all(&mut self) -> Result<Vec<Row>, Error> {
         let rows = self.builder
             .clone()
             .try_into()?
             .into_deserialize::<Row>()
             .map(|r| r.map_err(::failure::Error::from))
-            .collect::<Result<Vec<_>>>();
+            .collect::<Result<Vec<_>, _>>();
         Ok(rows?)
     }
 
-    fn select(&mut self, indices: &[usize]) -> Result<Vec<Row>> {
+    fn select(&mut self, indices: &[usize]) -> Result<Vec<Row>, Error> {
         let rows_iter = self.builder
             .clone()
             .try_into()?
@@ -163,7 +163,7 @@ where
     fn chunk_indices(
         &mut self,
         chunk_length: usize,
-    ) -> Result<Box<Iterator<Item = IntSliceIndex<usize>>>> {
+    ) -> Result<Box<Iterator<Item = IntSliceIndex<usize>>>, Error> {
         let chunk_indices = self.builder
             .clone()
             .try_into()
@@ -177,7 +177,7 @@ where
         Ok(Box::new(chunk_indices.into_iter()))
     }
 
-    fn count(&mut self) -> Result<usize> {
+    fn count(&mut self) -> Result<usize, Error> {
         Ok(self.builder.clone().try_into().unwrap().records().count())
     }
 }

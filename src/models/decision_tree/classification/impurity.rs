@@ -3,7 +3,7 @@ use models::decision_tree::histogram_generics::*;
 use models::decision_tree::split_improvement::SplitImprovement;
 use models::decision_tree::tree::NodeIndex;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Abomonation)]
 pub struct Gini;
 
 impl<T: ContinuousValue, L: DiscreteValue> SplitImprovement<T, L> for Gini {
