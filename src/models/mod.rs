@@ -18,10 +18,16 @@ pub trait ModelAttributes: Data {
     type UnlabeledSamples: Data;
     type Predictions: Data;
     type TrainingResult: Data;
+
+    type PredictErr: Fail + Data;
 }
 
 pub trait Train<S: Scope, M: ModelAttributes> {
     fn train(&self, model: &M) -> Stream<S, M::TrainingResult>;
+}
+
+pub trait TrainMeta<S: Scope, M: ModelAttributes> {
+    fn train_meta(&self, model: &M) -> Stream<S, M::TrainingResult>;
 }
 
 pub trait Predict<S: Scope, M: ModelAttributes, E: Data + Fail> {
@@ -33,7 +39,7 @@ pub trait Predict<S: Scope, M: ModelAttributes, E: Data + Fail> {
 }
 
 pub trait PredictSamples<Samples, Predictions, E: Data + Fail> {
-    fn predict_samples(&self, input: Samples) -> Result<Predictions, ModelError<E>>;
+    fn predict_samples(&self, input: &Samples) -> Result<Predictions, ModelError<E>>;
 }
 
 pub trait UnSupModel<Inputs: IndexableData, Predictions, TrainingOutput> {

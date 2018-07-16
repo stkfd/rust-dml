@@ -3,7 +3,7 @@
 
 #![allow(dead_code)]
 
-use data::serialization::*;
+use data::serialization::AbomonableArray1;
 use models::ModelError;
 use models::PredictSamples;
 use ndarray::prelude::*;
@@ -84,16 +84,15 @@ impl<T, L> DecisionTree<T, L> {
     }
 }
 
-impl<'a, T, L, I> PredictSamples<I, AbomonableArray1<L>, DecisionTreeError> for DecisionTree<T, L>
+impl<A, T, L> PredictSamples<A, AbomonableArray1<L>, DecisionTreeError> for DecisionTree<T, L>
 where
-    T: PartialOrd + 'a,
-    L: Copy + 'a,
-    I: Into<ArrayView2<'a, T>>,
-    I: 'a,
+    for <'a> &'a A: AsArray<'a, T, Ix2>,
+    T: PartialOrd,
+    L: Copy,
 {
     fn predict_samples(
         &self,
-        samples: I,
+        samples: &A,
     ) -> Result<AbomonableArray1<L>, ModelError<DecisionTreeError>> {
         let samples: ArrayView2<T> = samples.into();
         let mut labels = unsafe { Array1::uninitialized(samples.rows()) };

@@ -1,4 +1,4 @@
-#![feature(try_from, generic_associated_types)]
+#![feature(try_from)]
 
 extern crate abomonation;
 #[macro_use]

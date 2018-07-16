@@ -14,7 +14,7 @@
             "name": "Launch",
             "type": "lldb",
             "request": "launch",
-            "program": "${workspaceFolder}/target/debug/examples/decision_tree"
+            "program": "${workspaceFolder}/target/debug/examples/gradient_boosting"
         }
     ]
 }

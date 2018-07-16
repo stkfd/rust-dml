@@ -55,6 +55,8 @@ where
     type UnlabeledSamples = AbomonableArray2<T>;
     type Predictions = AbomonableArray1<L>;
     type TrainingResult = DecisionTree<T, L>;
+
+    type PredictErr = DecisionTreeError;
 }
 
 impl<S, I, T, L> Train<S, StreamingClassificationTree<I, T, L>> for Stream<S, TrainingData<T, L>>
@@ -121,7 +123,7 @@ where
         train_results: Stream<S, DecisionTree<T, L>>,
     ) -> Stream<S, Result<AbomonableArray1<L>, ModelError<DecisionTreeError>>> {
         train_results.apply_latest(self, |_time, tree, samples| {
-            tree.predict_samples(&samples)
+            tree.predict_samples(&samples).map(Into::into)
         })
     }
 }
