@@ -236,8 +236,6 @@ where
 
                 for (time, training_data_vec) in &mut training_data_stash {
                     if frontiers.iter().all(|f| !f.less_equal(time)) {
-                        debug!("W{}: {:?}", worker, time.time());
-                        debug!("W{}: {:?}", worker, training_result_stash);
                         let (training_result_opt, temp_boost_chain) = training_result_stash
                             .get_mut(time)
                             .expect("retrieve training result for corresponding data");
@@ -253,6 +251,7 @@ where
                                 temp_boost_chain,
                                 Vec::new(),
                             ));
+                            debug!("Completed boosting, returning accumulated model");
                             boost_chain_handle.session(time).give(boost_chain);
                         } else {
                             // calculate residuals and send to next iteration
