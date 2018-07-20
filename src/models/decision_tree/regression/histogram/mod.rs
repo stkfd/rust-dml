@@ -79,12 +79,12 @@ impl<T: DiscreteValue, L: ContinuousValue, Lf: WeightedLoss<L>> FindSplits<T, L,
                                     .iter()
                                     .map(|(_, hist, _)| *hist)
                                     .summarize()
-                                    .unwrap_or(Histogram::new(0));
+                                    .unwrap_or_else(|| Histogram::new(0));
                                 let right_split = right_slice
                                     .iter()
                                     .map(|(_, hist, _)| *hist)
                                     .summarize()
-                                    .unwrap_or(Histogram::new(0));
+                                    .unwrap_or_else(|| Histogram::new(0));
                                 debug!("split index: {}, l count: {}, r count: {}", split_index, left_slice.len(), right_slice.len());
 
                                 (
@@ -166,12 +166,13 @@ impl<L: ContinuousValue> BaseHistogram<L> for Histogram<L> {
             });
 
         if !found {
-            before.map(|dist| self.distances.push(dist));
-            self.bins
+            if let Some(dist) = before { self.distances.push(dist); }
+            if let Some(dist) = self.bins
                 .range((Excluded(new_bin_address.clone()), Unbounded))
                 .next()
-                .map(|(addr, _)| BinDistance::new(&new_bin_address, addr))
-                .map(|dist| self.distances.push(dist));
+                .map(|(addr, _)| BinDistance::new(&new_bin_address, addr)) {
+                self.distances.push(dist);
+            }
             self.bins.insert(new_bin_address, new_bin_data);
         }
         self.shrink_to_fit();
@@ -222,7 +223,7 @@ impl<L: ContinuousValue> Into<Histogram<L>> for SerializableHistogram<L> {
         for (left, right, data) in self.bins {
             histogram
                 .bins
-                .insert(BinAddress::new(left.into(), right.into()), data);
+                .insert(BinAddress::new(left, right), data);
             histogram.rebuild_distances();
         }
         histogram
@@ -249,7 +250,7 @@ impl<L: ContinuousValue> HistogramSetItem for Histogram<L> {
             self.bins
                 .entry(new_addr.clone())
                 .and_modify(|bin| bin.merge(&new_data))
-                .or_insert(new_data.clone());
+                .or_insert_with(|| new_data.clone());
         }
         self.rebuild_distances();
         self.shrink_to_fit();
@@ -291,11 +292,12 @@ where
             self.bins.insert(merged_addr.clone(), merged_data);
 
             // insert updated distances after merge
-            self.bins
+            if let Some(dist) = self.bins
                 .range((Excluded(&merged_addr), Unbounded))
                 .next()
-                .map(|(after_addr, _)| BinDistance::new(&merged_addr, after_addr))
-                .map(|dist| self.distances.push(dist));
+                .map(|(after_addr, _)| BinDistance::new(&merged_addr, after_addr)) {
+                self.distances.push(dist);
+            }
         }
     }
 
@@ -313,7 +315,7 @@ where
 
 impl<L: Float + fmt::Debug> fmt::Debug for Histogram<L> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        write!(fmt, "Bins:\n")?;
+        writeln!(fmt, "Bins:")?;
         for (addr, bin) in &self.bins {
             fmt::Display::fmt(
                 &format!(
@@ -325,7 +327,7 @@ impl<L: Float + fmt::Debug> fmt::Debug for Histogram<L> {
                 fmt,
             )?;
         }
-        write!(fmt, "Distances:\n")?;
+        writeln!(fmt, "Distances:")?;
         for dist in &self.distances {
             fmt::Display::fmt(&format!("{:?}\n", dist), fmt)?;
         }
@@ -498,7 +500,7 @@ mod test {
     fn insert() {
         let mut histogram = Histogram::new(3);
         let items = vec![1., 1., 2., 3.5, 2.1, 3.6];
-        for i in items.into_iter() {
+        for i in items {
             histogram.insert(i);
         }
         assert_eq!(

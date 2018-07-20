@@ -8,8 +8,7 @@ extern crate timely_communication;
 use flexi_logger::Logger;
 
 use ml_dataflow::data::{
-    dataflow::{ExchangeEvenly, SegmentTrainingData},
-    serialization::{AbomonableArray, AsView},
+    dataflow::{ExchangeEvenly, SegmentTrainingData}, serialization::{AbomonableArray, AsView},
     TrainingData,
 };
 use ml_dataflow::models::decision_tree::regression::StreamingRegressionTree;
@@ -52,11 +51,15 @@ fn main() {
 
             let in_stream = vec![AbomonableArray::from(x.clone())].to_stream(scope);
 
-            Predict::<_, GradientBoostingRegression<_, _, _>, _>::predict(
+            in_stream
+                .predict(&gradient_boosting_model, boost_chain)
+                .inspect(|d| println!("{}", d.as_ref().unwrap().view()));
+
+            /*Predict::<_, GradientBoostingRegression<_, _, _>, _>::predict(
                 &in_stream,
                 &gradient_boosting_model,
                 boost_chain,
-            ).inspect(|d| println!("{}", d.as_ref().unwrap().view()));
+            ).inspect(|d| println!("{}", d.as_ref().unwrap().view()));*/
         });
         while root.step() {}
     }).expect("Execute dataflow");

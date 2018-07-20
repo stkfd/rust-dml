@@ -12,7 +12,7 @@ use std::collections::hash_map::Entry::*;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::mem;
-use timely::dataflow::channels::pact::{Exchange, Pipeline};
+use timely::dataflow::channels::pact::Exchange;
 use timely::dataflow::operators::generic::builder_rc::OperatorBuilder;
 use timely::dataflow::scopes::Child;
 use timely::dataflow::{operators::*, Scope, Stream};
@@ -141,6 +141,7 @@ where
     }
 }
 
+#[allow(type_complexity)]
 pub trait CalculateResiduals<
     'a,
     S: Scope,
@@ -163,6 +164,7 @@ pub trait CalculateResiduals<
     );
 }
 
+#[allow(type_complexity)]
 impl<'a, S, T, L, InnerModel, LossFunc>
     CalculateResiduals<
         'a,
@@ -207,7 +209,7 @@ where
         builder.build(|_fsdd| {
             let mut training_data_stash = FnvHashMap::default();
             let mut training_result_stash = FnvHashMap::default();
-            
+
             move |frontiers| {
                 let mut residuals_handle = residuals_output.activate();
                 let mut boost_chain_handle = boost_chain_output.activate();
@@ -220,7 +222,11 @@ where
                             panic!("Received more than one training result per timestamp")
                         }
                         Vacant(entry) => {
-                            debug!("W{}: Saved training result at {:?}", worker, entry.key().time());
+                            debug!(
+                                "W{}: Saved training result at {:?}",
+                                worker,
+                                entry.key().time()
+                            );
                             entry.insert((Some(training_result), Vec::new()));
                         }
                     }
@@ -264,7 +270,9 @@ where
                                             &training_data.y(),
                                         );
                                         training_data.y = loss.into();
-                                        debug!("Calculated residuals and sending on to next iteration");
+                                        debug!(
+                                            "Calculated residuals and sending on to next iteration"
+                                        );
                                         residuals_session.give(training_data);
                                     }
                                     Err(err) => unimplemented!(),

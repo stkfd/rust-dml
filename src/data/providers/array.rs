@@ -43,6 +43,7 @@ pub struct ArrayProvider<T: Data> {
 impl<T: Data + Copy> DataSource<AbomonableArray2<T>> for ArrayProvider<T> {
     /// Fetch a partition of the items in this `DataSource`
     fn slice(&mut self, idx: IntSliceIndex<usize>) -> Result<AbomonableArray2<T>, Error> {
+        #[allow(deref_addrof)]
         Ok(self.array
             .slice(s![idx.start..(idx.start + idx.length), ..])
             .to_owned()

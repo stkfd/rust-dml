@@ -55,7 +55,7 @@ where
     type Serializable = SerializableVecHistogramSet<H::Serializable>;
 
     fn merge(&mut self, other: Self) {
-        for (key, value) in other.histograms.into_iter() {
+        for (key, value) in other.histograms {
             match self.histograms.entry(key) {
                 Occupied(mut entry) => {
                     entry.get_mut().merge(value);
@@ -69,7 +69,7 @@ where
 
     fn merge_borrowed(&mut self, other: &Self) {
         for (key, value) in other.histograms.iter() {
-            match self.histograms.entry(key.clone()) {
+            match self.histograms.entry(key) {
                 Occupied(mut entry) => {
                     entry.get_mut().merge_borrowed(value);
                 }
@@ -102,7 +102,7 @@ where
     }
 
     fn select<'a>(&mut self, keys: impl IntoIterator<Item = &'a usize>, callback: impl Fn(&mut H)) {
-        for key in keys.into_iter() {
+        for key in keys {
             if let Some(entry) = self.histograms.get_mut(*key) {
                 callback(entry);
             }

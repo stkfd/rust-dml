@@ -179,7 +179,7 @@ impl<T, L> IndexMut<NodeIndex> for DecisionTree<T, L> {
 pub struct NodeIndex(usize);
 
 impl NodeIndex {
-    pub fn inner(&self) -> usize {
+    pub fn inner(self) -> usize {
         self.0
     }
 }

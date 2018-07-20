@@ -20,7 +20,8 @@ impl<S, Ts1, T, L, I> SplitLeaves<T, L, S, I>
             DecisionTree<T, L>,
             <TargetValueHistogramSet<T, L> as HistogramSetItem>::Serializable,
         ),
-    > where
+    >
+where
     (
         DecisionTree<T, L>,
         <TargetValueHistogramSet<T, L> as HistogramSetItem>::Serializable,
@@ -31,11 +32,7 @@ impl<S, Ts1, T, L, I> SplitLeaves<T, L, S, I>
     L: ContinuousValue + Debug,
     I: Clone + WeightedLoss<L> + 'static,
 {
-    fn split_leaves(
-        &self,
-        levels: u64,
-        loss_func: I,
-    ) -> Stream<S, (usize, DecisionTree<T, L>)> {
+    fn split_leaves(&self, levels: u64, loss_func: I) -> Stream<S, (usize, DecisionTree<T, L>)> {
         self.unary(Pipeline, "BuildTree", |_, _| {
             move |input, output| {
                 let loss_func = loss_func.clone();
@@ -55,10 +52,10 @@ impl<S, Ts1, T, L, I> SplitLeaves<T, L, S, I>
                         } else {
                             debug!("Labeling remaining leaf nodes");
                             for leaf in tree.unlabeled_leaves() {
-                                histograms.find_node_label(&leaf).map(|label| {
+                                if let Some(label) = histograms.find_node_label(&leaf) {
                                     debug!("Labeling node {:?} with {:?}", leaf, label);
                                     tree.label(leaf, label);
-                                });
+                                }
                             }
                         }
                         output.session(&time).give((split_leaves, tree));
