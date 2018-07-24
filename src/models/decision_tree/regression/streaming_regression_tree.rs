@@ -1,6 +1,4 @@
-use models::decision_tree::tree::DecisionTreeError;
-use std::marker::PhantomData;
-use data::dataflow::ApplyLatest;
+use data::dataflow::{ApplyLatest, InitEachTime};
 use data::serialization::*;
 use data::TrainingData;
 use models::decision_tree::histogram_generics::{ContinuousValue, DiscreteValue};
@@ -8,7 +6,9 @@ use models::decision_tree::operators::{AggregateHistograms, CreateHistograms, Sp
 use models::decision_tree::regression::histogram::loss_functions::TrimmedLadWeightedLoss;
 use models::decision_tree::regression::histogram::TargetValueHistogramSet;
 use models::decision_tree::tree::DecisionTree;
+use models::decision_tree::tree::DecisionTreeError;
 use models::*;
+use std::marker::PhantomData;
 use timely::dataflow::operators::*;
 use timely::dataflow::{Scope, Stream};
 use timely::ExchangeData;
@@ -47,26 +47,18 @@ impl<T: Data, L: Data> ModelAttributes for StreamingRegressionTree<T, L> {
 impl<S: Scope, T: DiscreteValue, L: ContinuousValue> Train<S, StreamingRegressionTree<T, L>>
     for Stream<S, TrainingData<T, L>>
 {
-    fn train(
-        &self,
-        model: &StreamingRegressionTree<T, L>,
-    ) -> Stream<S, DecisionTree<T, L>> {
-        let mut scope = self.scope();
+    fn train(&self, model: &StreamingRegressionTree<T, L>) -> Stream<S, DecisionTree<T, L>> {
         let levels = model.levels;
+        let worker = self.scope().index();
 
-        scope.scoped::<u64, _, _>(|tree_iter_scope| {
-            let init_tree = if tree_iter_scope.index() == 0 {
-                vec![DecisionTree::<T, L>::default()]
-            } else {
-                vec![]
-            };
+        let init_tree = vec![DecisionTree::<T, L>::default()].init_each_time(self);
 
+        self.scope().scoped::<u64, _, _>(|tree_iter_scope| {
             let (loop_handle, cycle) = tree_iter_scope.loop_variable(model.levels, 1);
             let (iterate, finished_tree) = init_tree
-                .to_stream(tree_iter_scope)
+                .enter(tree_iter_scope)
                 .concat(&cycle)
-                .inspect(|x| info!("Begin tree iteration: {:?}", x))
-                .broadcast()
+                .inspect_time(|time, _| info!("Begin decision tree iteration {}", time.inner))
                 .create_histograms::<TargetValueHistogramSet<T, L>>(
                     &self.enter(tree_iter_scope),
                     model.bins,
@@ -74,20 +66,23 @@ impl<S: Scope, T: DiscreteValue, L: ContinuousValue> Train<S, StreamingRegressio
                 )
                 .aggregate_histograms::<TargetValueHistogramSet<T, L>>()
                 .split_leaves(model.levels, TrimmedLadWeightedLoss(model.trim_ratio))
-                .map(move |(split_leaves, tree)| {
-                    info!("Split {} leaves", split_leaves);
-                    tree
+                .inspect_time(|time, (split_leaves, tree)| {
+                    info!(
+                        "Split {} leaf nodes in iteration {}",
+                        split_leaves, time.inner
+                    );
+                    info!("Updated tree: {:?}", tree);
                 })
+                .map(move |(_, tree)| tree)
                 .branch(move |time, _| time.inner >= levels);
 
-            iterate.connect_loop(loop_handle);
+            iterate.broadcast().connect_loop(loop_handle);
             finished_tree.leave()
         })
     }
 }
 
-impl<S, T, L>
-    Predict<S, StreamingRegressionTree<T, L>, DecisionTreeError>
+impl<S, T, L> Predict<S, StreamingRegressionTree<T, L>, DecisionTreeError>
     for Stream<S, AbomonableArray2<T>>
 where
     S: Scope,

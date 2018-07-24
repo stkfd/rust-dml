@@ -90,8 +90,9 @@ where
                         if tree_stash.contains_key(&time) || trees.len() > 1 {
                             panic!("Received more than one tree for a time")
                         }
-                        let tree = trees.drain(..).next().unwrap();
-                        tree_stash.insert(time, Some(tree));
+                        if let Some(tree) = trees.drain(..).next() {
+                            tree_stash.insert(time, Some(tree));
+                        }
                     });
 
                     let frontiers = [in_data.frontier(), in_tree.frontier()];
@@ -103,15 +104,18 @@ where
                             let (_, _, data) = data_stash.get(&time.outer).expect("Retrieve data");
 
                             let histograms = H::from_data(&tree, data, bins);
-
                             out.session(&time).give((tree.clone(), histograms.into()));
                         }
                     }
 
                     data_stash.retain(|time, _| {
-                        !frontiers
-                            .iter()
-                            .all(|f| !f.less_equal(&Product::new(time.clone(), <u64>::max_value())))
+                        let retain = in_tree
+                            .frontier()
+                            .less_equal(&Product::new(time.clone(), <u64>::max_value()));
+                        if !retain {
+                            debug!("Drop data stash on worker {} at time {:?}", worker, time)
+                        }
+                        retain
                     });
                     tree_stash.retain(|_time, tree_opt| tree_opt.is_some());
                 }
@@ -159,7 +163,7 @@ where
                 move |input, output| {
                     // receive and merge incoming histograms
                     input.for_each(|cap_ref, data| {
-                        debug!("Receiving histograms for merging");
+                        debug!("Receiving histograms for merging at {:?}", cap_ref.time());
                         let opt_entry = stash.entry(cap_ref.retain()).or_insert_with(|| {
                             let (tree, f_hist) = data.pop().expect("First tree/histogram set");
                             Some((tree, f_hist.into()))
@@ -178,10 +182,11 @@ where
                         if !input.frontier().less_equal(cap) {
                             debug!(
                                 "Sending merged histograms for timestamp {:?} on worker {}",
-                                cap, worker
+                                cap.time(),
+                                worker
                             );
                             let (tree, merged_set) = stash_entry.take().unwrap();
-                            output.session(cap).give((tree.clone(), merged_set.into()));
+                            output.session(cap).give((tree, merged_set.into()));
                         }
                     }
 

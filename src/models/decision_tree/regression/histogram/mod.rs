@@ -11,7 +11,6 @@ use std::fmt;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 
 pub mod loss_functions;
-pub mod operators;
 mod target_value_set;
 pub use self::target_value_set::*;
 

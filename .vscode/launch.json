@@ -5,13 +5,13 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Launch",
+            "name": "Launch DT Regression Example",
             "type": "lldb",
             "request": "launch",
-            "program": "${workspaceFolder}/target/debug/examples/kmeans"
+            "program": "${workspaceFolder}/target/debug/examples/decision_tree_regression"
         },
         {
-            "name": "Launch",
+            "name": "Launch GB Example",
             "type": "lldb",
             "request": "launch",
             "program": "${workspaceFolder}/target/debug/examples/gradient_boosting"

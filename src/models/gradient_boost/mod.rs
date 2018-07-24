@@ -6,13 +6,14 @@ use fnv::FnvHashMap;
 use models::decision_tree::histogram_generics::ContinuousValue;
 use models::*;
 use ndarray::prelude::*;
+use ndarray::ScalarOperand;
 use num_traits::Float;
 use num_traits::Zero;
 use std::collections::hash_map::Entry::*;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::mem;
-use timely::dataflow::channels::pact::Exchange;
+use timely::dataflow::channels::pact::Pipeline;
 use timely::dataflow::operators::generic::builder_rc::OperatorBuilder;
 use timely::dataflow::scopes::Child;
 use timely::dataflow::{operators::*, Scope, Stream};
@@ -50,13 +51,23 @@ impl<InnerModel: ModelAttributes, T: Data, L: Data> ModelAttributes
 
 #[derive(Clone, Abomonation, Debug)]
 pub struct BoostChain<InnerModel: ModelAttributes, T, L>(
-    pub Vec<InnerModel::TrainingResult>,
+    pub Vec<(L, InnerModel::TrainingResult)>,
     PhantomData<(InnerModel, T, L)>,
 );
 
 impl<InnerModel: ModelAttributes, T, L> BoostChain<InnerModel, T, L> {
-    pub fn new(items: Vec<InnerModel::TrainingResult>) -> BoostChain<InnerModel, T, L> {
+    pub fn new(items: Vec<(L, InnerModel::TrainingResult)>) -> BoostChain<InnerModel, T, L> {
         BoostChain(items, PhantomData)
+    }
+
+    pub fn push_item(&mut self, multiplier: L, item: InnerModel::TrainingResult) {
+        self.0.push((multiplier, item))
+    }
+}
+
+impl<InnerModel: ModelAttributes, T, L> Default for BoostChain<InnerModel, T, L> {
+    fn default() -> Self {
+        Self::new(vec![])
     }
 }
 
@@ -64,7 +75,7 @@ impl<A, InnerModel, T, L> PredictSamples<A, AbomonableArray1<L>, InnerModel::Pre
     for BoostChain<InnerModel, T, L>
 where
     for<'a> &'a A: AsArray<'a, T, Ix2>,
-    L: Clone + Zero,
+    L: Float + ScalarOperand,
     InnerModel: ModelAttributes,
     for<'a> InnerModel::TrainingResult:
         PredictSamples<ArrayView2<'a, T>, AbomonableArray1<L>, InnerModel::PredictErr>,
@@ -76,9 +87,9 @@ where
         let view = a.into();
         let mut agg = Array1::zeros(view.rows());
 
-        for training_output in &self.0 {
+        for (multi, training_output) in &self.0 {
             let prediction: Array1<L> = training_output.predict_samples(&view)?.into();
-            agg = agg + prediction;
+            agg = agg + prediction * *multi;
         }
         Ok(agg.into())
     }
@@ -110,7 +121,7 @@ impl<S, InnerModel, T, L> TrainMeta<S, GradientBoostingRegression<InnerModel, T,
 where
     S: Scope,
     T: Debug + ExchangeData,
-    L: ContinuousValue,
+    L: ContinuousValue + ScalarOperand,
     InnerModel: ModelAttributes<Predictions = AbomonableArray1<L>>,
     InnerModel::TrainingResult: Debug,
     for<'b> InnerModel::TrainingResult:
@@ -123,14 +134,24 @@ where
         model: &GradientBoostingRegression<InnerModel, T, L>,
     ) -> Stream<S, BoostChain<InnerModel, T, L>> {
         let mut scope = self.scope();
+        let worker = scope.index();
         scope.scoped::<u64, _, _>(|boost_iter_scope| {
-            let (loop_handle, cycle) = boost_iter_scope.loop_variable(model.iterations, 1);
-            let data = self.enter(boost_iter_scope).concat(&cycle);
+            let (loop_handle, cycle) = boost_iter_scope.loop_variable(model.iterations - 1, 1);
+            let data = self
+                .enter(boost_iter_scope)
+                .concat(&cycle)
+                .inspect_time(move |time, _| {
+                    debug!("W{}: Received residuals (round {})", worker, time.inner)
+                });
 
-            let training_results = <Stream<Child<'_, _, u64>, _> as Train<_, InnerModel>>::train(
-                &data,
-                &model.inner_model,
-            );
+            let training_results =
+                <Stream<_, _> as Train<_, InnerModel>>::train(&data, &model.inner_model)
+                    .inspect_time(move |time, _| {
+                        debug!(
+                            "W{}: Completed training model to residuals (round {})",
+                            worker, time.inner
+                        )
+                    });
 
             let (residuals_stream, boost_chain_stream) =
                 data.calculate_residuals(model.clone(), &training_results, AbsoluteLoss);
@@ -178,7 +199,7 @@ impl<'a, S, T, L, InnerModel, LossFunc>
     > for Stream<Child<'a, S, u64>, TrainingData<T, L>>
 where
     T: ExchangeData + Debug,
-    L: ExchangeData + Debug,
+    L: ExchangeData + Debug + Float + ScalarOperand,
     S: Scope,
     InnerModel: ModelAttributes<Predictions = AbomonableArray1<L>>,
     for<'b> InnerModel::TrainingResult:
@@ -197,11 +218,10 @@ where
         Stream<S, BoostChain<InnerModel, T, L>>,
     ) {
         let worker = self.scope().index();
-        let mut builder = OperatorBuilder::new("Branch".to_owned(), self.scope());
+        let mut builder = OperatorBuilder::new("CalculateResiduals".to_owned(), self.scope());
 
-        let mut training_data_input = builder.new_input(self, Exchange::new(|_| 0_u64));
-        let mut training_result_input =
-            builder.new_input(training_results, Exchange::new(|_| 0_u64));
+        let mut training_data_input = builder.new_input(self, Pipeline);
+        let mut training_result_input = builder.new_input(&training_results.broadcast(), Pipeline);
 
         let (mut residuals_output, residuals_stream) = builder.new_output();
         let (mut boost_chain_output, boost_chain_stream) = builder.new_output();
@@ -209,6 +229,7 @@ where
         builder.build(|_fsdd| {
             let mut training_data_stash = FnvHashMap::default();
             let mut training_result_stash = FnvHashMap::default();
+            let mut boost_chain_stash = FnvHashMap::default();
 
             move |frontiers| {
                 let mut residuals_handle = residuals_output.activate();
@@ -217,23 +238,19 @@ where
                 training_result_input.for_each(|time, incoming_data| {
                     assert!(incoming_data.len() == 1);
                     let training_result = incoming_data.pop().unwrap();
-                    match training_result_stash.entry(time.retain()) {
+
+                    match training_result_stash.entry(time.time().clone()) {
                         Occupied(_entry) => {
                             panic!("Received more than one training result per timestamp")
                         }
                         Vacant(entry) => {
-                            debug!(
-                                "W{}: Saved training result at {:?}",
-                                worker,
-                                entry.key().time()
-                            );
-                            entry.insert((Some(training_result), Vec::new()));
+                            debug!("W{}: Saved training result at {:?}", worker, entry.key());
+                            entry.insert(training_result);
                         }
                     }
                 });
 
                 training_data_input.for_each(|time, incoming_data| {
-                    debug!("W{}: Incoming training data at {:?}", worker, time.time());
                     training_data_stash
                         .entry(time.retain())
                         .or_insert_with(Vec::new)
@@ -242,37 +259,43 @@ where
 
                 for (time, training_data_vec) in &mut training_data_stash {
                     if frontiers.iter().all(|f| !f.less_equal(time)) {
-                        let (training_result_opt, temp_boost_chain) = training_result_stash
-                            .get_mut(time)
+                        let training_result = training_result_stash
+                            .remove(time)
                             .expect("retrieve training result for corresponding data");
-
-                        let training_result = training_result_opt.take().unwrap();
-                        temp_boost_chain.push(training_result.clone());
 
                         let mut residuals_session = residuals_handle.session(time);
 
-                        if time.inner >= model.iterations {
+                        if time.inner + 1 >= model.iterations {
+                            let boost_chain = boost_chain_stash
+                                .remove(&time.time().outer.clone())
+                                .unwrap();
                             // send boost chain
-                            let boost_chain = BoostChain::<InnerModel, T, L>::new(mem::replace(
-                                temp_boost_chain,
-                                Vec::new(),
-                            ));
-                            debug!("Completed boosting, returning accumulated model");
+                            training_data_vec.clear();
+                            info!("Completed boosting, returning accumulated model");
                             boost_chain_handle.session(time).give(boost_chain);
                         } else {
+                            let tmp_chain = boost_chain_stash
+                                .entry(time.time().outer.clone())
+                                .or_insert_with(BoostChain::default);
+
                             // calculate residuals and send to next iteration
                             for mut training_data in training_data_vec.drain(..) {
-                                match training_result.predict_samples(&training_data.x()) {
-                                    Ok(predictions) => {
-                                        let predictions: Array1<L> = predictions.into();
-                                        let loss = LossFunc::residual_loss(
+                                let previous_iterations_prediction =
+                                    tmp_chain.predict_samples(&training_data.x());
+
+                                match previous_iterations_prediction {
+                                    Ok(old_predictions) => {
+                                        let old_predictions: Array1<L> = old_predictions.into();
+
+                                        /*let loss = LossFunc::residual_loss(
                                             predictions,
                                             &training_data.y(),
-                                        );
+                                        );*/
                                         training_data.y = loss.into();
-                                        debug!(
+                                        info!(
                                             "Calculated residuals and sending on to next iteration"
                                         );
+                                        info!("{:?}", training_data.y());
                                         residuals_session.give(training_data);
                                     }
                                     Err(err) => unimplemented!(),
@@ -283,9 +306,6 @@ where
                 }
 
                 training_data_stash.retain(|_time, item| !item.is_empty());
-                training_result_stash.retain(|_time, (result_opt, tmp_chain)| {
-                    result_opt.is_some() || !tmp_chain.is_empty()
-                });
             }
         });
 
@@ -294,14 +314,19 @@ where
 }
 
 pub trait ResidualLossFunction<L> {
-    fn residual_loss(predicted: Array1<L>, actual: &ArrayView1<L>) -> Array1<L>;
+    fn differential_loss(predicted: Array1<L>, actual: &ArrayView1<L>) -> Array1<L>;
+    fn loss(predicted: Array1<L>, actual: &ArrayView1<L>) -> Array1<L>;
 }
 
 #[derive(Clone, Copy, Debug)]
 pub struct AbsoluteLoss;
 
 impl<L: Clone + Float> ResidualLossFunction<L> for AbsoluteLoss {
-    fn residual_loss(predicted: Array1<L>, actual: &ArrayView1<L>) -> Array1<L> {
+    fn differential_loss(predicted: Array1<L>, actual: &ArrayView1<L>) -> Array1<L> {
+        (predicted - actual).mapv_into(|x| x.signum())
+    }
+
+    fn loss(predicted: Array1<L>, actual: &ArrayView1<L>) -> Array1<L> {
         (predicted - actual).mapv_into(|x| x.abs())
     }
 }

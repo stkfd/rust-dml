@@ -42,9 +42,9 @@ where
                         let current_iteration = time.inner;
                         let mut split_leaves = 0;
                         if current_iteration < levels {
-                            debug!("Begin splitting phase");
                             let splits =
                                 histograms.find_best_splits(&tree.unlabeled_leaves(), &loss_func);
+                            split_leaves = splits.len();
                             for (node, rule) in splits {
                                 // TODO: add intermediary labels to nodes
                                 tree.split(node, rule, histograms.find_node_label(&node));
