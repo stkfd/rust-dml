@@ -49,7 +49,6 @@ impl<S: Scope, T: DiscreteValue, L: ContinuousValue> Train<S, StreamingRegressio
 {
     fn train(&self, model: &StreamingRegressionTree<T, L>) -> Stream<S, DecisionTree<T, L>> {
         let levels = model.levels;
-        let worker = self.scope().index();
 
         let init_tree = vec![DecisionTree::<T, L>::default()].init_each_time(self);
 

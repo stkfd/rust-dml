@@ -31,7 +31,7 @@ fn main() {
 
         let points_per_worker = 500_000;
         let regression_tree_model = StreamingRegressionTree::new(1, points_per_worker, 5, 1.0);
-        let gradient_boosting_model = GradientBoostingRegression::new(2, regression_tree_model);
+        let gradient_boosting_model = GradientBoostingRegression::new(3, regression_tree_model);
 
         root.dataflow::<u64, _, _>(|root_scope| {
             let training_stream = vec![

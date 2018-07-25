@@ -60,7 +60,7 @@ where
     }
 }
 
-pub trait BaseHistogram<T>: HistogramSetItem {
+pub trait BaseHistogram<T, C>: HistogramSetItem {
     /// Type of a bin in this histogram
     type Bin;
 
@@ -68,10 +68,10 @@ pub trait BaseHistogram<T>: HistogramSetItem {
     fn new(n_bins: usize) -> Self;
 
     /// Insert a new data point into this histogram
-    fn insert(&mut self, value: T);
+    fn insert(&mut self, value: T, count: C);
 
     /// Count the total number of data points in this histogram (over all bins)
-    fn count(&self) -> u64;
+    fn count(&self) -> C;
 }
 
 pub trait Median<T> {

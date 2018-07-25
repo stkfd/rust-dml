@@ -9,18 +9,13 @@ use models::decision_tree::tree::{DecisionTree, Node, NodeIndex};
 use num_traits::Float;
 use std::cmp::Ordering;
 
-/*pub type SerializableFeatureValueHistogramSet<T, L> = SerializableBTreeHistogramSet<
-    NodeIndex,
-    SerializableVecHistogramSet<SerializableBTreeHistogramSet<L, Histogram<T>>>,
->;*/
-
 #[derive(Abomonation, Debug, Clone, PartialEq)]
 pub struct Histogram<T: Float> {
     bins: usize,
     data: Vec<Bin<T>>,
 }
 
-impl<T: ContinuousValue> BaseHistogram<T> for Histogram<T> {
+impl<T: ContinuousValue> BaseHistogram<T, u64> for Histogram<T> {
     /// Type of a bin in this histogram
     type Bin = Bin<T>;
 
@@ -33,11 +28,11 @@ impl<T: ContinuousValue> BaseHistogram<T> for Histogram<T> {
     }
 
     /// Insert a new data point into this histogram
-    fn insert(&mut self, p: T) {
+    fn insert(&mut self, p: T, count: u64) {
         let bins = &mut self.data;
 
         match bins.binary_search_by(|probe| probe.p.partial_cmp(&p).unwrap_or(Ordering::Less)) {
-            Ok(found_index) => bins[found_index].m = bins[found_index].m + flt(1.),
+            Ok(found_index) => bins[found_index].m = bins[found_index].m + T::from(count).unwrap(),
             Err(insert_at) => {
                 bins.insert(insert_at, bin(p, flt(1.)));
 
@@ -381,7 +376,7 @@ impl<'a, T: ContinuousValue, L: DiscreteValue> FromData<DecisionTree<T, L>, Trai
                             .get_or_insert_with(&node_index, Default::default)
                             .get_or_insert_with(&i_attr, Default::default)
                             .get_or_insert_with(y_i, || BaseHistogram::new(bins))
-                            .insert(*x_i);
+                            .insert(*x_i, 1);
                     }
                 }
             }
@@ -402,7 +397,7 @@ mod test {
     fn update() {
         let mut hist: Histogram<f64> = Histogram::new(5);
         for i in &[23., 19., 10., 16., 36.] {
-            hist.insert(*i);
+            hist.insert(*i, 1);
         }
 
         ulps_eq!(
@@ -417,7 +412,7 @@ mod test {
             max_ulps = 2,
         );
 
-        hist.insert(2.);
+        hist.insert(2., 1);
         ulps_eq!(
             hist,
             &vec![
@@ -430,7 +425,7 @@ mod test {
             max_ulps = 2,
         );
 
-        hist.insert(9.);
+        hist.insert(9., 1);
         ulps_eq!(
             hist,
             &vec![
@@ -449,12 +444,12 @@ mod test {
         let mut h1 = [23., 19., 10., 16., 36., 2., 9.].iter().fold(
             Histogram::new(5),
             |mut h, i| {
-                h.insert(*i);
+                h.insert(*i, 1);
                 h
             },
         );
         let h2 = [32., 30., 45.].iter().fold(Histogram::new(5), |mut h, i| {
-            h.insert(*i);
+            h.insert(*i, 1);
             h
         });
         h1.merge_borrowed(&h2);

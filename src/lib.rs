@@ -1,4 +1,5 @@
 #![feature(try_from)]
+#![allow(unknown_lints)]
 
 extern crate abomonation;
 #[macro_use]

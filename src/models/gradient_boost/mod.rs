@@ -3,16 +3,15 @@ use data::serialization::*;
 use data::TrainingData;
 use failure::Fail;
 use fnv::FnvHashMap;
-use models::decision_tree::histogram_generics::ContinuousValue;
+use models::decision_tree::histogram_generics::{BaseHistogram, ContinuousValue, Median};
+use models::decision_tree::regression::histogram::Histogram;
 use models::*;
 use ndarray::prelude::*;
-use ndarray::ScalarOperand;
-use num_traits::Float;
-use num_traits::Zero;
+use ndarray::{ScalarOperand, Zip};
+use num_traits::{Float, FromPrimitive, NumAssign, ToPrimitive, Zero};
 use std::collections::hash_map::Entry::*;
 use std::fmt::Debug;
 use std::marker::PhantomData;
-use std::mem;
 use timely::dataflow::channels::pact::Pipeline;
 use timely::dataflow::operators::generic::builder_rc::OperatorBuilder;
 use timely::dataflow::scopes::Child;
@@ -121,7 +120,7 @@ impl<S, InnerModel, T, L> TrainMeta<S, GradientBoostingRegression<InnerModel, T,
 where
     S: Scope,
     T: Debug + ExchangeData,
-    L: ContinuousValue + ScalarOperand,
+    L: ContinuousValue + ScalarOperand + NumAssign + ToPrimitive + FromPrimitive,
     InnerModel: ModelAttributes<Predictions = AbomonableArray1<L>>,
     InnerModel::TrainingResult: Debug,
     for<'b> InnerModel::TrainingResult:
@@ -154,7 +153,7 @@ where
                     });
 
             let (residuals_stream, boost_chain_stream) =
-                data.calculate_residuals(model.clone(), &training_results, AbsoluteLoss);
+                data.calculate_residuals(model.clone(), &training_results);
 
             residuals_stream.connect_loop(loop_handle);
             boost_chain_stream
@@ -169,7 +168,6 @@ pub trait CalculateResiduals<
     Model,
     TrainingData: Data,
     InnerModel: ModelAttributes,
-    LossFunc,
     T,
     L,
 >
@@ -178,7 +176,6 @@ pub trait CalculateResiduals<
         &self,
         model: Model,
         training_results: &Stream<Child<'a, S, u64>, InnerModel::TrainingResult>,
-        residual_calc: LossFunc,
     ) -> (
         Stream<Child<'a, S, u64>, TrainingData>,
         Stream<S, BoostChain<InnerModel, T, L>>,
@@ -186,33 +183,36 @@ pub trait CalculateResiduals<
 }
 
 #[allow(type_complexity)]
-impl<'a, S, T, L, InnerModel, LossFunc>
+impl<'a, S, T, L, InnerModel>
     CalculateResiduals<
         'a,
         S,
         GradientBoostingRegression<InnerModel, T, L>,
         TrainingData<T, L>,
         InnerModel,
-        LossFunc,
         T,
         L,
     > for Stream<Child<'a, S, u64>, TrainingData<T, L>>
 where
     T: ExchangeData + Debug,
-    L: ExchangeData + Debug + Float + ScalarOperand,
+    L: ExchangeData
+        + Debug
+        + ContinuousValue
+        + ScalarOperand
+        + NumAssign
+        + ToPrimitive
+        + FromPrimitive,
     S: Scope,
     InnerModel: ModelAttributes<Predictions = AbomonableArray1<L>>,
     for<'b> InnerModel::TrainingResult:
         ExchangeData
             + Debug
             + PredictSamples<ArrayView2<'b, T>, AbomonableArray1<L>, InnerModel::PredictErr>,
-    LossFunc: ResidualLossFunction<L>,
 {
     fn calculate_residuals(
         &self,
         model: GradientBoostingRegression<InnerModel, T, L>,
         training_results: &Stream<Child<'a, S, u64>, InnerModel::TrainingResult>,
-        _residual_calc: LossFunc,
     ) -> (
         Stream<Child<'a, S, u64>, TrainingData<T, L>>,
         Stream<S, BoostChain<InnerModel, T, L>>,
@@ -278,28 +278,56 @@ where
                                 .entry(time.time().outer.clone())
                                 .or_insert_with(BoostChain::default);
 
+                            let total_items = training_data_vec.iter().map(|td| td.y().len()).sum();
+                            let mut histogram =
+                                Histogram::<L, L>::new(<usize>::min(100_000, total_items));
+
                             // calculate residuals and send to next iteration
-                            for mut training_data in training_data_vec.drain(..) {
-                                let previous_iterations_prediction =
-                                    tmp_chain.predict_samples(&training_data.x());
+                            let data: Vec<_> = training_data_vec
+                                .drain(..)
+                                .map(|td| {
+                                    let previous_predictions = tmp_chain.predict_samples(&td.x());
+                                    let added_predictions =
+                                        training_result.predict_samples(&td.x());
 
-                                match previous_iterations_prediction {
-                                    Ok(old_predictions) => {
-                                        let old_predictions: Array1<L> = old_predictions.into();
+                                    (
+                                        td,
+                                        previous_predictions.expect("Predict items"),
+                                        added_predictions.expect("Predict items"),
+                                    )
+                                })
+                                .collect();
 
-                                        /*let loss = LossFunc::residual_loss(
-                                            predictions,
-                                            &training_data.y(),
-                                        );*/
-                                        training_data.y = loss.into();
-                                        info!(
-                                            "Calculated residuals and sending on to next iteration"
-                                        );
-                                        info!("{:?}", training_data.y());
-                                        residuals_session.give(training_data);
-                                    }
-                                    Err(err) => unimplemented!(),
-                                }
+                            for (training_data, previous_predictions, added_predictions) in &data {
+                                Zip::from(&training_data.y())
+                                    .and(previous_predictions.view())
+                                    .and(added_predictions.view())
+                                    .apply(|&actual, &previous, &added| {
+                                        let diff = (actual - previous) / added;
+                                        let weight = added.abs();
+                                        histogram.insert(diff, weight);
+                                    });
+                            }
+
+                            let multi = histogram.median().expect("get median");
+                            tmp_chain.push_item(multi, training_result);
+
+                            for (mut training_data, previous_predictions, added_predictions) in data {
+                                let previous_predictions: Array1<L> = previous_predictions.into();
+                                let added_predictions: Array1<L> = added_predictions.into();
+                                let combined_predictions: Array1<L> =
+                                    previous_predictions + added_predictions * multi;
+
+                                // for LAD, the gradients are the sign of the difference between the actual
+                                // and predicted values
+                                training_data.y = (&training_data.y()
+                                    - &combined_predictions.view())
+                                    //.map(|x| x.signum())
+                                    .into();
+
+                                info!("Calculated residuals and sending on to next iteration");
+                                info!("{:?}", training_data.y());
+                                residuals_session.give(training_data);
                             }
                         }
                     }
@@ -314,19 +342,10 @@ where
 }
 
 pub trait ResidualLossFunction<L> {
-    fn differential_loss(predicted: Array1<L>, actual: &ArrayView1<L>) -> Array1<L>;
-    fn loss(predicted: Array1<L>, actual: &ArrayView1<L>) -> Array1<L>;
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct AbsoluteLoss;
-
-impl<L: Clone + Float> ResidualLossFunction<L> for AbsoluteLoss {
-    fn differential_loss(predicted: Array1<L>, actual: &ArrayView1<L>) -> Array1<L> {
-        (predicted - actual).mapv_into(|x| x.signum())
-    }
-
-    fn loss(predicted: Array1<L>, actual: &ArrayView1<L>) -> Array1<L> {
-        (predicted - actual).mapv_into(|x| x.abs())
-    }
+    fn loss_gradients(predicted: &ArrayView1<L>, actual: &ArrayView1<L>) -> Array1<L>;
+    fn optimize_stage_multiplier(
+        actual: &ArrayView1<L>,
+        previous_predictions: &ArrayView1<L>,
+        added_predictions: &ArrayView1<L>,
+    ) -> L;
 }

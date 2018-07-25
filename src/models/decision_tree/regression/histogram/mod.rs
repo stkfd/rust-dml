@@ -1,8 +1,13 @@
+use num_traits::NumAssign;
+use num_traits::FromPrimitive;
+use num_traits::ToPrimitive;
+use timely::ExchangeData;
+use num_traits::One;
 use data::TrainingData;
 use self::loss_functions::*;
 use models::decision_tree::histogram_generics::*;
 use models::decision_tree::tree::{DecisionTree, Rule, NodeIndex, Node};
-use num_traits::Float;
+use num_traits::{NumCast, Float};
 use ordered_float::OrderedFloat;
 use std::cmp::Ordering;
 use std::collections::binary_heap::BinaryHeap;
@@ -122,20 +127,20 @@ impl<T: DiscreteValue, L: ContinuousValue + fmt::Debug> FindNodeLabel<L> for Tar
 
 /// Histogram describing the target value distribution at a certain tree node
 #[derive(Clone)]
-pub struct Histogram<L: Float> {
-    bins: BTreeMap<BinAddress<L>, BinData<L>>,
+pub struct Histogram<L: Float, C: ExchangeData + NumAssign> {
+    bins: BTreeMap<BinAddress<L>, BinData<L, C>>,
     distances: BinaryHeap<BinDistance<L>>,
     n_bins: usize,
 }
 
 #[derive(Clone, Abomonation)]
-pub struct SerializableHistogram<L>{
+pub struct SerializableHistogram<L, C>{
     n_bins: usize,
-    bins: Vec<(L, L, BinData<L>)>
+    bins: Vec<(L, L, BinData<L, C>)>
 }
 
-impl<L: ContinuousValue> BaseHistogram<L> for Histogram<L> {
-    type Bin = (BinAddress<L>, BinData<L>);
+impl<L: ContinuousValue, C: ExchangeData + NumAssign> BaseHistogram<L, C> for Histogram<L, C> {
+    type Bin = (BinAddress<L>, BinData<L, C>);
 
     fn new(n_bins: usize) -> Self {
         Histogram {
@@ -145,7 +150,7 @@ impl<L: ContinuousValue> BaseHistogram<L> for Histogram<L> {
         }
     }
 
-    fn insert(&mut self, y: L) {
+    fn insert(&mut self, y: L, count: C) {
         let new_bin_data = BinData::init(y);
         let new_bin_address = BinAddress::init(y);
         let mut found = false;
@@ -155,7 +160,7 @@ impl<L: ContinuousValue> BaseHistogram<L> for Histogram<L> {
             .next_back()
             .and_then(|(addr, data)| {
                 if addr.right >= new_bin_address.right {
-                    data.count += 1;
+                    data.count += count;
                     data.sum = data.sum + y;
                     found = true;
                     None
@@ -177,34 +182,37 @@ impl<L: ContinuousValue> BaseHistogram<L> for Histogram<L> {
         self.shrink_to_fit();
     }
 
-    fn count(&self) -> u64 {
-        self.bins.iter().fold(0, |sum, (_, d)| sum + d.count)
+    fn count(&self) -> C {
+        self.bins.iter().fold(C::zero(), |sum, (_, d)| sum + d.count.clone())
     }
 }
 
-impl<L: ContinuousValue> Median<L> for Histogram<L> {
+impl<L, C> Median<L> for Histogram<L, C>
+where L: ContinuousValue,
+    C: PartialOrd + NumAssign + ExchangeData + ToPrimitive + FromPrimitive,
+{
     fn median(&self) -> Option<L> {
-        let mut count_target = self.count() / 2;
+        let mut count_target = self.count() / C::from_usize(2).unwrap();
         let (bin_addr, bin_data) = self
             .bins
             .iter()
             .skip_while(|(_, data)| {
                 if count_target >= data.count {
-                    count_target -= data.count;
+                    count_target -= data.count.clone();
                     true
                 } else  { false }
             })
             .next()?;
-        let ratio = L::from(count_target).unwrap() / L::from(bin_data.count).unwrap();
+        let ratio = L::from(count_target).unwrap() / L::from(bin_data.count.clone()).unwrap();
         let l = bin_addr.left.into_inner();
         let r = bin_addr.right.into_inner();
         Some(l + (r - l) * ratio)
     }
 }
 
-impl<L: ContinuousValue> From<Histogram<L>> for SerializableHistogram<L> {
+impl<L: ContinuousValue, C: NumAssign + ExchangeData> From<Histogram<L, C>> for SerializableHistogram<L, C> {
     /// Turn this item into a serializable version of itself
-    fn from(hist: Histogram<L>) -> Self {
+    fn from(hist: Histogram<L, C>) -> Self {
         let n_bins = hist.n_bins;
         let bins = hist
             .bins
@@ -215,9 +223,9 @@ impl<L: ContinuousValue> From<Histogram<L>> for SerializableHistogram<L> {
     }
 }
 
-impl<L: ContinuousValue> Into<Histogram<L>> for SerializableHistogram<L> {
+impl<L: ContinuousValue, C: NumAssign + ExchangeData> Into<Histogram<L, C>> for SerializableHistogram<L, C> {
     /// Recover a item from its serializable representation
-    fn into(self) -> Histogram<L> {
+    fn into(self) -> Histogram<L, C> {
         let mut histogram = Histogram::new(self.n_bins);
         for (left, right, data) in self.bins {
             histogram
@@ -229,8 +237,9 @@ impl<L: ContinuousValue> Into<Histogram<L>> for SerializableHistogram<L> {
     }
 }
 
-impl<L: ContinuousValue> HistogramSetItem for Histogram<L> {
-    type Serializable = SerializableHistogram<L>;
+impl<L: ContinuousValue, C: ExchangeData + NumAssign> HistogramSetItem for Histogram<L, C>
+where SerializableHistogram<L, C>: Into<Histogram<L, C>> {
+    type Serializable = SerializableHistogram<L, C>;
     
     /// Merge another instance of this type into this histogram
     fn merge(&mut self, other: Self) {
@@ -260,7 +269,7 @@ impl<L: ContinuousValue> HistogramSetItem for Histogram<L> {
     }
 }
 
-impl<L: Float> Histogram<L>
+impl<L: Float, C: ExchangeData + NumAssign> Histogram<L, C>
 where
     BinAddress<L>: Ord,
 {
@@ -307,12 +316,12 @@ where
         }
     }
 
-    pub fn bins(&self) -> &BTreeMap<BinAddress<L>, BinData<L>> {
+    pub fn bins(&self) -> &BTreeMap<BinAddress<L>, BinData<L, C>> {
         &self.bins
     }
 }
 
-impl<L: Float + fmt::Debug> fmt::Debug for Histogram<L> {
+impl<L: Float + fmt::Debug, C: fmt::Debug + ExchangeData + NumAssign> fmt::Debug for Histogram<L, C> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         writeln!(fmt, "Bins:")?;
         for (addr, bin) in &self.bins {
@@ -391,17 +400,17 @@ impl<L: Float> BinAddress<L> {
 }
 
 #[derive(Debug, Clone, PartialEq, Abomonation)]
-pub struct BinData<L> {
-    count: u64,
+pub struct BinData<L, C> {
+    count: C,
     sum: L,
 }
 
-impl<L: Float> BinData<L> {
+impl<L: Float, C: NumAssign + ExchangeData> BinData<L, C> {
     pub fn init(y: L) -> Self {
-        BinData { count: 1, sum: y }
+        BinData { count: One::one(), sum: y }
     }
 
-    pub fn new(count: u64, sum: L) -> Self {
+    pub fn new(count: C, sum: L) -> Self {
         BinData { count, sum }
     }
 
@@ -409,26 +418,26 @@ impl<L: Float> BinData<L> {
     /// and shifting the center of the bin to accomodate
     pub fn merge(&mut self, other: &Self) {
         self.sum = self.sum + other.sum;
-        self.count += other.count;
+        self.count += other.count.clone();
     }
 }
 
-trait PartialBinSum<L> {
+trait PartialBinSum<L, C> {
     /// Estimates an R-partial sum of this bin, where R is any number
     /// between 0 and the number of samples contained in the bin
     /// panics if R is greater than the count of items in the bin
-    fn partial_sum(&self, r: u64) -> L;
+    fn partial_sum(&self, r: C) -> L;
 }
 
-impl<'a, 'b, L: Float> PartialBinSum<L> for (&'a BinAddress<L>, &'b BinData<L>) {
+impl<'a, 'b, L: Float + NumCast, C: Clone + PartialOrd + ToPrimitive + NumAssign> PartialBinSum<L, C> for (&'a BinAddress<L>, &'b BinData<L, C>) {
     /// Estimates an R-partial sum of this bin, where R is any number
     /// between 0 and the number of samples contained in the bin
     /// panics if R is greater than the count of items in the bin
-    fn partial_sum(&self, r: u64) -> L {
+    fn partial_sum(&self, r: C) -> L {
         let (addr, data) = self;
-        let r_float = L::from(r).unwrap();
+        let r_float = L::from(r.clone()).unwrap();
         if r < data.count {
-            let count_float = L::from(data.count).unwrap();
+            let count_float = L::from(data.count.clone()).unwrap();
             let two = L::from(2.).unwrap();
             let delta = (data.sum - *addr.right - count_float * *addr.left + *addr.left)
                 / ((count_float - two) * (count_float - L::one()));
@@ -500,7 +509,7 @@ mod test {
         let mut histogram = Histogram::new(3);
         let items = vec![1., 1., 2., 3.5, 2.1, 3.6];
         for i in items {
-            histogram.insert(i);
+            histogram.insert(i, 1);
         }
         assert_eq!(
             histogram.bins().iter().collect::<Vec<_>>(),
@@ -517,10 +526,10 @@ mod test {
         let mut h1 = Histogram::new(3);
         vec![1., 1.5, 3., 4., 4.5, 6.]
             .into_iter()
-            .for_each(|i| h1.insert(i));
+            .for_each(|i| h1.insert(i, 1));
 
         let mut h2 = Histogram::new(3);
-        vec![1.0, 7.0, 5.0].into_iter().for_each(|i| h2.insert(i));
+        vec![1.0, 7.0, 5.0].into_iter().for_each(|i| h2.insert(i, 1));
         h1.merge_borrowed(&h2);
 
         assert_eq!(
@@ -556,7 +565,7 @@ impl<'a, T: DiscreteValue, L: ContinuousValue> FromData<DecisionTree<T, L>, Trai
                         node_histograms
                             .get_or_insert_with(&i_attr, Default::default)
                             .get_or_insert_with(x_i, || BaseHistogram::new(bins))
-                            .insert(*y_i);
+                            .insert(*y_i, 1);
                     }
                 }
             }

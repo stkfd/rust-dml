@@ -3,18 +3,20 @@ use models::decision_tree::tree::NodeIndex;
 use super::*;
 
 type K = NodeIndex;
-type Inner<T, L> = VecHistogramSet<FnvHistogramSet<T, Histogram<L>>>;
+type Inner<T, L> = VecHistogramSet<FnvHistogramSet<T, Histogram<L, u64>>>;
 
 /// Nested set of histograms that contains
 /// Node -> Attribute Index -> Feature Value -> Histogram with target values
+#[allow(type_complexity)]
 #[derive(Clone)]
 pub struct TargetValueHistogramSet<T: DiscreteValue, L: ContinuousValue>(
-    BTreeHistogramSet<NodeIndex, VecHistogramSet<FnvHistogramSet<T, Histogram<L>>>>,
+    BTreeHistogramSet<NodeIndex, VecHistogramSet<FnvHistogramSet<T, Histogram<L, u64>>>>,
 );
 
+#[allow(type_complexity)]
 #[derive(Clone, Abomonation)]
 pub struct SerializableTargetValueHistogramSet<T: DiscreteValue, L: ContinuousValue>(
-    SerializableBTreeHistogramSet<NodeIndex, SerializableVecHistogramSet<SerializableFnvHistogramSet<T, SerializableHistogram<L>>>>,
+    SerializableBTreeHistogramSet<NodeIndex, SerializableVecHistogramSet<SerializableFnvHistogramSet<T, SerializableHistogram<L, u64>>>>,
 );
 
 impl<T: DiscreteValue, L: ContinuousValue> Default for TargetValueHistogramSet<T, L> {

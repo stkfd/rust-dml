@@ -7,7 +7,7 @@ pub trait TrimmedLad<L> {
     fn trimmed_lad(&self, trim_ratio: L) -> L;
 }
 
-impl<L: ContinuousValue> TrimmedLad<L> for Histogram<L> {
+impl<L: ContinuousValue> TrimmedLad<L> for Histogram<L, u64> {
     fn trimmed_lad(&self, trim_ratio: L) -> L {
         let count_total = self.count();
         let count_total_f = L::from(count_total).unwrap();
@@ -75,14 +75,14 @@ impl<L: ContinuousValue> TrimmedLad<L> for Histogram<L> {
 }
 
 pub trait WeightedLoss<L: Float> {
-    fn weighted_loss(&self, h_total: &Histogram<L>, h_left: &Histogram<L>, h_right: &Histogram<L>) -> L;
+    fn weighted_loss(&self, h_total: &Histogram<L, u64>, h_left: &Histogram<L, u64>, h_right: &Histogram<L, u64>) -> L;
 }
 
 #[derive(Clone, Copy, Constructor)]
 pub struct TrimmedLadWeightedLoss<L>(pub L);
 
 impl<L: ContinuousValue> WeightedLoss<L> for TrimmedLadWeightedLoss<L> {
-    fn weighted_loss(&self, h_total: &Histogram<L>, h_left: &Histogram<L>, h_right: &Histogram<L>) -> L {
+    fn weighted_loss(&self, h_total: &Histogram<L, u64>, h_left: &Histogram<L, u64>, h_right: &Histogram<L, u64>) -> L {
         let lad_l = h_left.trimmed_lad(self.0);
         let count_l = L::from(h_left.count()).unwrap();
 
