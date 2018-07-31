@@ -13,8 +13,8 @@ use timely::Data;
 
 mod apply_latest;
 mod exchange_evenly;
-mod random;
 mod init_each_time;
+pub mod random;
 
 pub use self::apply_latest::ApplyLatest;
 pub use self::exchange_evenly::ExchangeEvenly;

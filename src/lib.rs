@@ -28,6 +28,7 @@ extern crate ordered_float;
 extern crate vec_map;
 #[macro_use]
 extern crate derive_more;
+extern crate probability;
 
 pub mod data;
 pub mod models;

@@ -1,6 +1,7 @@
 pub mod dataflow;
 pub mod providers;
 pub mod serialization;
+pub mod quantize;
 
 use data::serialization::*;
 use ndarray::prelude::*;

@@ -40,7 +40,7 @@ impl<T: DiscreteValue, L: ContinuousValue, Lf: WeightedLoss<L>> FindSplits<T, L,
                 }
             })
             .map(|(node, node_histograms)| {
-                let (attr, x_subset, _loss) = node_histograms
+                node_histograms
                     .iter()
                     .map(|(attribute, attr_histograms)| {
                         // sort feature values according to their median values
@@ -60,7 +60,7 @@ impl<T: DiscreteValue, L: ContinuousValue, Lf: WeightedLoss<L>> FindSplits<T, L,
                             .summarize()
                             .expect("merge all attribute histograms");
 
-                        let (x_subset, min_loss) = attr_histograms
+                        let subset_and_loss = attr_histograms
                             .iter()
                             .filter_map(|(x_trial, _)| {
                                 let split_index = sorted_feature_values
@@ -100,15 +100,19 @@ impl<T: DiscreteValue, L: ContinuousValue, Lf: WeightedLoss<L>> FindSplits<T, L,
                                     )),
                                 )
                             })
-                            .min_by(|(_x1, loss1), (_x2, loss2)| loss1.cmp(loss2))
-                            .unwrap();
-                        (attribute, x_subset, min_loss)
+                            .min_by(|(_x1, loss1), (_x2, loss2)| loss1.cmp(loss2));
+                            
+                        if let Some((x_subset, min_loss)) = subset_and_loss {
+                            Some((attribute, x_subset, min_loss))
+                        } else {
+                            None
+                        }
                     })
+                    .filter_map(|x| x)
                     .min_by(|(_, _, loss1), (_, _, loss2)| loss1.cmp(loss2))
-                    .unwrap();
-
-                (*node, Rule::subset(attr, x_subset))
+                    .map(|(attr, x_subset, _loss)| (*node, Rule::subset(attr, x_subset)))
             })
+            .filter_map(|x| x)
             .collect()
     }
 }
