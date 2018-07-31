@@ -47,6 +47,7 @@ impl NormalQuantizer {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct UniformQuantizer {
     ranges: Vec<f64>,
 }
@@ -58,6 +59,7 @@ impl UniformQuantizer {
             .map(|s| (s as f64 / steps as f64) * interval + low)
             .collect();
         ranges.insert(0, NEG_INFINITY);
+        ranges.push(INFINITY);
 
         UniformQuantizer { ranges }
     }
@@ -66,8 +68,8 @@ impl UniformQuantizer {
         self.ranges
             .iter()
             .enumerate()
-            .find(|(_idx, &threshold)| threshold < num)
+            .find(|(_idx, &threshold)| threshold > num)
             .unwrap()
-            .0 as i64
+            .0 as i64 - 1
     }
 }
