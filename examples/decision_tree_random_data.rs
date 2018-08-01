@@ -10,7 +10,12 @@ use timely::dataflow::Stream;
 
 use ml_dataflow::data::dataflow::random::{params::*, RandRegressionTrainingSource};
 use ml_dataflow::data::{
-    dataflow::ExchangeEvenly, quantize::*, serialization::AsView, TrainingData,
+    dataflow::{
+        error_measures::{MeasurePredictionError, Rmse},
+        ExchangeEvenly,
+    },
+    quantize::*,
+    TrainingData,
 };
 use ml_dataflow::models::decision_tree::regression::*;
 use ml_dataflow::models::*;
@@ -51,25 +56,27 @@ fn main() {
         root.dataflow::<u64, _, _>(|root_scope| {
             let training_stream: Stream<_, TrainingData<i64, f64>> = rand_source
                 .clone()
-                .samples(25000, 8)
+                .samples(25000, 1)
                 .to_stream(Summary::Local(1), RootTimestamp::new(1), root_scope);
 
-            let trees = training_stream
-                .exchange_evenly()
-                .train(&model);
+            let trees = training_stream.train(&model);
 
-            if root_scope.index() == 0 {
-                rand_source.clone().samples(10, 1).to_stream(
+            let predict_data = if root_scope.index() == 0 {
+                rand_source.clone().samples(200, 1).to_stream(
                     Summary::Local(1),
                     RootTimestamp::new(1),
                     root_scope,
                 )
             } else {
                 vec![].to_stream(root_scope)
-            }.inspect(|d| println!("{}", d.y()))
+            }.inspect(|d| println!("{}", d.y()));
+
+            predict_data
                 .map(|t_d| t_d.x)
                 .predict(&model, trees.broadcast())
-                .inspect(|d| println!("{}", d.as_ref().unwrap().view()));
+                .map(|res| res.expect("prediction"))
+                .prediction_error(&predict_data.map(|t_d| t_d.y), Rmse)
+                .inspect_time(|time, d| println!("{:?} {}", time, d));
         });
         while root.step() {}
     }).expect("Execute dataflow");

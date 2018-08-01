@@ -101,10 +101,12 @@ where
                         if frontiers.iter().all(|f| !f.less_equal(&time)) {
                             let tree = tree_opt.take().unwrap();
                             debug!("Worker {} collecting histograms", worker);
-                            let (_, _, data) = data_stash.get(&time.outer).expect("Retrieve data");
-
-                            let histograms = H::from_data(&tree, data, bins);
-                            out.session(&time).give((tree.clone(), histograms.into()));
+                            if let Some((_, _, data)) = data_stash.get(&time.outer) {
+                                let histograms = H::from_data(&tree, data, bins);
+                                out.session(&time).give((tree.clone(), histograms.into()));
+                            } else {
+                                warn!("Worker {} received no data", worker);
+                            }
                         }
                     }
 

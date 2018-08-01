@@ -12,6 +12,7 @@ use timely::dataflow::{Scope, Stream};
 use timely::Data;
 
 mod apply_latest;
+pub mod error_measures;
 mod exchange_evenly;
 mod init_each_time;
 pub mod random;
