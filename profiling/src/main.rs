@@ -1,7 +1,9 @@
+extern crate flame;
 extern crate flexi_logger;
 extern crate log;
 extern crate ml_dataflow;
 extern crate ndarray;
+extern crate quicli;
 extern crate timely;
 extern crate timely_communication;
 
@@ -17,33 +19,42 @@ use ml_dataflow::data::{
 use ml_dataflow::models::decision_tree::regression::*;
 use ml_dataflow::models::*;
 use ndarray::prelude::*;
+use quicli::prelude::*;
+use std::fs::File;
 use timely::dataflow::operators::*;
 use timely::progress::nested::Summary;
 use timely::progress::timestamp::RootTimestamp;
 use timely_communication::initialize::Configuration;
 
+#[derive(Debug, StructOpt)]
+struct Cli {
+    #[structopt(long = "samples", default_value = "1000000")]
+    samples: u64,
+    #[structopt(long = "quantize-resolution", default_value = "20")]
+    quantize_resolution: usize,
+    #[structopt(long = "histogram-bins", default_value = "50")]
+    histogram_bins: usize,
+    #[structopt(long = "tree-levels", default_value = "4")]
+    tree_levels: u64,
+}
+
 fn main() {
-    let tree_levels = 4;
-    let n_threads = 8;
-    let n_samples = 2_000_000;
+    let args = Cli::from_args();
 
-    let quantize_resolution = 20;
-    let histogram_bins = 50;
+    Logger::with_env_or_str("ml_dataflow=warn").start().unwrap();
 
-    let samples_per_thread = n_samples / n_threads;
+    flame::start_guard("Regression tree");
 
-    Logger::with_env_or_str("ml_dataflow=info").start().unwrap();
-
-    ::timely::execute(Configuration::Process(n_threads as usize), move |root| {
+    ::timely::execute(Configuration::Thread, move |root| {
         let distribution_params = arr1(&[
             NormalParams::new(0., 5.),
             NormalParams::new(5., 5.),
             NormalParams::new(10., 5.),
         ]);
         let distribution_quantizers = [
-            NormalQuantizer::new(0., 5., quantize_resolution),
-            NormalQuantizer::new(5., 5., quantize_resolution),
-            NormalQuantizer::new(10., 5., quantize_resolution),
+            NormalQuantizer::new(0., 5., args.quantize_resolution),
+            NormalQuantizer::new(5., 5., args.quantize_resolution),
+            NormalQuantizer::new(10., 5., args.quantize_resolution),
         ];
 
         let rand_source = RandRegressionTrainingSource::new(
@@ -55,27 +66,29 @@ fn main() {
             },
         ).x_distributions(distribution_params);
 
-        let model = StreamingRegressionTree::new(tree_levels, n_samples, histogram_bins, 1.0);
+        let model =
+            StreamingRegressionTree::new(args.tree_levels, args.samples, args.histogram_bins, 1.0);
 
         root.dataflow::<u64, _, _>(|root_scope| {
             let worker = root_scope.index();
 
             let training_stream: Stream<_, TrainingData<i64, f64>> = rand_source
                 .clone()
-                .samples(samples_per_thread as usize, 1)
-                .to_stream(Summary::Local(1), RootTimestamp::new(1), root_scope);
+                .samples(args.samples as usize, 1)
+                .to_stream(Summary::Local(1), RootTimestamp::new(1), root_scope)
+                .inspect_batch(|_, _| {
+                    flame::start("training");
+                });
 
-            let trees = training_stream.train(&model);
+            let trees = training_stream.train(&model).inspect_batch(|_, _| {
+                flame::end("training");
+            });
 
-            let predict_data = if worker == 0 {
-                rand_source.clone().samples(200, 1).to_stream(
-                    Summary::Local(1),
-                    RootTimestamp::new(1),
-                    root_scope,
-                )
-            } else {
-                vec![].to_stream(root_scope)
-            }.inspect(|d| println!("{}", d.y()));
+            let predict_data = rand_source
+                .clone()
+                .samples(200, 1)
+                .to_stream(Summary::Local(1), RootTimestamp::new(1), root_scope)
+                .inspect(|d| println!("{}", d.y()));
 
             predict_data
                 .map(|t_d| t_d.x)
@@ -84,6 +97,9 @@ fn main() {
                 .prediction_error(&predict_data.map(|t_d| t_d.y), Rmse)
                 .inspect_time(move |time, d| {
                     println!("{:?} {}", time, d);
+                    flame::dump_html(
+                        &mut File::create(format!("flame-graph-{}.html", worker)).unwrap(),
+                    ).unwrap();
                 });
         });
         while root.step() {}

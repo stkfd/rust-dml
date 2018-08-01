@@ -1,4 +1,6 @@
 use data::TrainingData;
+#[cfg(feature = "profile")]
+use flame;
 use fnv::FnvHashMap;
 use models::decision_tree::histogram_generics::*;
 use models::decision_tree::tree::DecisionTree;
@@ -48,6 +50,9 @@ where
                 let mut tree_stash = FnvHashMap::default();
 
                 move |in_tree, in_data, out| {
+                    #[cfg(feature = "profile")]
+                    flame::start("CreateHistograms");
+
                     in_data.for_each(|cap, data| {
                         let outer_time = cap.time().outer.clone();
 
@@ -120,6 +125,9 @@ where
                         retain
                     });
                     tree_stash.retain(|_time, tree_opt| tree_opt.is_some());
+
+                    #[cfg(feature = "profile")]
+                    flame::end("CreateHistograms");
                 }
             },
         )
@@ -163,6 +171,8 @@ where
                 let mut stash: FnvHashMap<Capability<_>, Option<(Tree, Set)>> =
                     FnvHashMap::default();
                 move |input, output| {
+                    #[cfg(feature = "profile")]
+                    flame::start("MergeHistogramSets");
                     // receive and merge incoming histograms
                     input.for_each(|cap_ref, data| {
                         debug!("Receiving histograms for merging at {:?}", cap_ref.time());
@@ -193,6 +203,8 @@ where
                     }
 
                     stash.retain(|_, entry| entry.is_some());
+                    #[cfg(feature = "profile")]
+                    flame::end("MergeHistogramSets");
                 }
             })
     }

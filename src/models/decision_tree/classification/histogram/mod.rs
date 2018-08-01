@@ -358,6 +358,7 @@ impl<T: ContinuousValue, L: DiscreteValue> FindNodeLabel<L> for FeatureValueHist
 impl<'a, T: ContinuousValue, L: DiscreteValue> FromData<DecisionTree<T, L>, TrainingData<T, L>>
     for FeatureValueHistogramSet<T, L>
 {
+    #[cfg_attr(feature="profile", flame)]
     fn from_data(tree: &DecisionTree<T, L>, data: &[TrainingData<T, L>], bins: usize) -> Self {
         let mut histograms = Self::default();
 

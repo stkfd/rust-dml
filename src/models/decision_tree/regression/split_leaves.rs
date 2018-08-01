@@ -13,6 +13,9 @@ use timely::progress::nested::product::Product;
 use timely::progress::Timestamp;
 use timely::Data;
 
+#[cfg(feature = "profile")]
+use flame;
+
 impl<S, Ts1, T, L, I> SplitLeaves<T, L, S, I>
     for Stream<
         S,
@@ -35,6 +38,9 @@ where
     fn split_leaves(&self, levels: u64, loss_func: I) -> Stream<S, (usize, DecisionTree<T, L>)> {
         self.unary(Pipeline, "BuildTree", |_, _| {
             move |input, output| {
+                #[cfg(feature = "profile")]
+                flame::start("SplitLeaves");
+
                 let loss_func = loss_func.clone();
                 input.for_each(|time, data| {
                     for (mut tree, flat_histograms) in data.drain(..) {
@@ -61,6 +67,9 @@ where
                         output.session(&time).give((split_leaves, tree));
                     }
                 });
+
+                #[cfg(feature = "profile")]
+                flame::end("SplitLeaves");
             }
         })
     }

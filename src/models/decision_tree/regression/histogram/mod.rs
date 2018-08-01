@@ -26,6 +26,7 @@ pub trait FindSplits<T, L: Float, Lf: WeightedLoss<L>> {
 impl<T: DiscreteValue, L: ContinuousValue, Lf: WeightedLoss<L>> FindSplits<T, L, Lf>
     for TargetValueHistogramSet<T, L>
 {
+    #[cfg_attr(feature="profile", flame)]
     fn find_best_splits(&self, nodes: &[NodeIndex], loss_func: &Lf) -> Vec<(NodeIndex, Rule<T>)> {
         nodes
             .iter()
@@ -550,6 +551,7 @@ mod test {
 impl<'a, T: DiscreteValue, L: ContinuousValue> FromData<DecisionTree<T, L>, TrainingData<T, L>>
     for TargetValueHistogramSet<T, L>
 {
+    #[cfg_attr(feature="profile", flame)]
     fn from_data(tree: &DecisionTree<T, L>, data: &[TrainingData<T, L>], bins: usize) -> Self {
         let mut histograms = Self::default();
 
