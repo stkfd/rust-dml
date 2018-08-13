@@ -1,11 +1,19 @@
 //! The K-Means Clustering Algorithm.
 
-use failure::Error;
 use self::aggregator::*;
-use data::dataflow::AsyncResult;
-use data::providers::IntSliceIndex;
+use self::assign_points::AssignPoints;
+pub use self::convergence::*;
+pub use self::initializers::KMeansInitializer;
+use self::stop_condition::StopCondition;
+use data::dataflow::{AsyncResult, IndexDataStream};
 use data::providers::{DataSource, DataSourceSpec};
 use data::serialization::*;
+use data::TrainingData;
+use failure::Error;
+use models::kmeans::initializers::KMeansStreamInitializer;
+use models::ModelAttributes;
+use models::SupModelAttributes;
+use models::Train;
 use models::UnSupModel;
 use ndarray::indices;
 use ndarray::prelude::*;
@@ -13,24 +21,25 @@ use ndarray::{NdProducer, ScalarOperand, Zip};
 use ndarray_linalg::{Norm, Scalar};
 use num_traits::cast::FromPrimitive;
 use num_traits::Float;
+use num_traits::NumAssignOps;
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::fmt::Display;
 use std::marker::PhantomData;
-use std::ops::{AddAssign, DivAssign, Sub};
 use std::sync::mpsc;
 use timely::dataflow::channels::pact::Pipeline;
 use timely::progress::Timestamp;
 use timely::{
-    dataflow::{operators::*, Scope, Stream}, progress::nested::product::Product, Data, ExchangeData,
+    dataflow::{operators::*, Scope, Stream},
+    progress::nested::product::Product,
+    Data, ExchangeData,
 };
 
-pub use self::initializers::KMeansInitializer;
-
 mod aggregator;
+mod assign_points;
 mod convergence;
 pub mod initializers;
-
-pub use self::convergence::*;
+mod stop_condition;
 
 const CHUNK_SIZE: usize = 5000;
 
@@ -38,6 +47,14 @@ pub struct Kmeans<Item: Data, Init: KMeansInitializer<Item>> {
     n_clusters: usize,
     cols: usize,
     centroids: AsyncResult<AbomonableArray2<Item>>,
+    end_criteria: ConvergenceCriteria<Item>,
+    phantom_data: PhantomData<Init>,
+}
+
+#[derive(Abomonation, Clone)]
+pub struct KmeansStreaming<Item: Data, Init: KMeansStreamInitializer<Item> + Data> {
+    n_clusters: usize,
+    cols: usize,
     end_criteria: ConvergenceCriteria<Item>,
     phantom_data: PhantomData<Init>,
 }
@@ -61,15 +78,7 @@ impl<Item: Data, Init: KMeansInitializer<Item>> Kmeans<Item, Init> {
 impl<Item, Init> UnSupModel<AbomonableArray2<Item>, AbomonableArray2<usize>, AbomonableArray2<Item>>
     for Kmeans<Item, Init>
 where
-    Item: ExchangeData
-        + FromPrimitive
-        + Scalar
-        + Float
-        + Display
-        + ScalarOperand
-        + AddAssign<Item>
-        + DivAssign<Item>
-        + Sub<Item>,
+    Item: ExchangeData + FromPrimitive + Float + Display + ScalarOperand + Scalar + NumAssignOps,
     Init: KMeansInitializer<Item>,
 {
     fn predict<S: Scope, Sp: DataSourceSpec<AbomonableArray2<Item>>>(
@@ -149,7 +158,8 @@ where
         let cols = self.cols;
 
         let end_criteria = self.end_criteria.clone();
-        let max_iterations = self.end_criteria
+        let max_iterations = self
+            .end_criteria
             .max_iterations
             .unwrap_or(<usize>::max_value());
 
@@ -193,7 +203,7 @@ where
                 .filter(move |_| worker_index == 0)
                 .concat(&loop_stream)
                 // checks whether the convergence criteria are met and aborts the loop
-                .end_condition(end_criteria);
+                .stop_condition(end_criteria);
 
             next_iteration
                 .broadcast()
@@ -224,149 +234,81 @@ where
     }
 }
 
-trait AssignPoints<S: Scope, D: Data + ::std::fmt::Debug> {
-    fn assign_points(
-        &self,
-        points_stream: &Stream<S, (IntSliceIndex<usize>, AbomonableArray2<D>)>,
-    ) -> Stream<S, AbomonableAggregationStatistics<D>>;
+impl<T: Data, Init: Data + KMeansStreamInitializer<T>> ModelAttributes
+    for KmeansStreaming<T, Init>
+{
+    type UnlabeledSamples = AbomonableArray2<T>;
+    type TrainingResult = AbomonableArray2<T>;
 }
 
-impl<S: Scope<Timestamp = Product<T, usize>>, T: Timestamp, D> AssignPoints<S, D>
-    for Stream<S, AbomonableArray2<D>>
+impl<T: Data, Init: Data + KMeansStreamInitializer<T>> SupModelAttributes
+    for KmeansStreaming<T, Init>
+{
+    type LabeledSamples = TrainingData<T, T>;
+    type Predictions = AbomonableArray1<T>;
+    type PredictErr = KMeansError;
+}
+
+#[derive(Fail, Debug, Abomonation, Clone)]
+pub enum KMeansError {
+    #[fail(display = "Unknown Error")]
+    Unknown,
+}
+
+impl<S, T, Init> Train<S, KmeansStreaming<T, Init>> for Stream<S, AbomonableArray2<T>>
 where
-    D: ::std::fmt::Debug
-        + Data
-        + AddAssign<D>
-        + DivAssign<D>
-        + Scalar
-        + FromPrimitive
-        + ScalarOperand,
+    S: Scope,
+    T: ExchangeData + Scalar + NumAssignOps + ScalarOperand + Float + Debug + FromPrimitive,
+    Init: Data + KMeansStreamInitializer<T>,
 {
-    fn assign_points(
-        &self,
-        points_stream: &Stream<S, (IntSliceIndex<usize>, AbomonableArray2<D>)>,
-    ) -> Stream<S, AbomonableAggregationStatistics<D>> {
-        let worker_index = self.scope().index();
-        self.binary_frontier(&points_stream, Pipeline, Pipeline, "AssignPoints", |_, _| {
-            let mut point_stash = Vec::new();
-            let mut centroid_stash = HashMap::new();
+    fn train(&self, model: &KmeansStreaming<T, Init>) -> Stream<S, AbomonableArray2<T>> {
+        let n_clusters = model.n_clusters;
+        let cols = model.cols;
 
-            move |in_centroids, in_points, out| {
-                in_centroids.for_each(|time, data| {
+        let end_criteria = model.end_criteria.clone();
+        let max_iterations = model
+            .end_criteria
+            .max_iterations
+            .unwrap_or(<usize>::max_value());
+
+        let initial_centroids =
+            Init::select_initial_centroids(self, n_clusters).inspect(|initial_centroids| {
+                debug!("Selected initial centroids: {:?}", initial_centroids.view());
+            });
+
+        self.scope().scoped(|inner| {
+            let worker_index = inner.index();
+            debug!("Constructing worker {}", inner.index());
+
+            let (loop_handle, loop_stream) = inner.loop_variable(max_iterations, 1);
+
+            let (done, next_iteration) = initial_centroids
+                .enter(inner)
+                .filter(move |_| worker_index == 0)
+                .concat(&loop_stream)
+                // checks whether the convergence criteria are met and aborts the loop
+                .stop_condition(end_criteria);
+
+            next_iteration
+                .broadcast()
+                .assign_points(&(self.index_data().enter(inner)))
+                .exchange(|_| 0u64)
+                .accumulate_statistics(AggregationStatistics::new(n_clusters, cols))
+                .map(move |stats| {
                     debug!(
-                        "Worker {} receiving {} sets of centroids",
-                        worker_index,
-                        data.len()
+                        "Worker {}: Aggregated all assignments, calculating new centroids",
+                        worker_index
                     );
-                    let entry = centroid_stash.entry(time.retain()).or_insert_with(Vec::new);
-                    entry.extend(data.drain(..));
-                });
+                    AggregationStatistics::from(stats)
+                        .centroid_estimate()
+                        .into()
+                })
+                .connect_loop(loop_handle);
 
-                in_points.for_each(|time, data| {
-                    debug!(
-                        "Worker {} receiving {} data chunks",
-                        worker_index,
-                        data.len()
-                    );
-                    assert_eq!(time.inner, 0);
-                    point_stash.extend(data.drain(..));
-                });
-
-                let frontiers = [in_centroids.frontier(), in_points.frontier()];
-                for (cap, centroid_list) in &mut centroid_stash {
-                    // if neither input can produce data at `time`, compute statistics
-                    if frontiers.iter().all(|f| !f.less_equal(cap.time())) {
-                        debug!("Worker {} processing centroid/point data", worker_index);
-                        let mut session = out.session(&cap);
-
-                        for centroids in centroid_list.drain(..) {
-                            let centroids_view = centroids.view();
-                            let mut agg = AggregationStatistics::new(
-                                centroids_view.rows(),
-                                centroids_view.cols(),
-                            );
-
-                            for &(slice_index, ref points) in &point_stash {
-                                let points_view: ArrayView<_, _> = points.into();
-                                agg.collect_assignment_statistics(&points_view, &centroids_view, &slice_index);
-                            }
-
-                            session.give(agg.into());
-                        }
-                    }
-                }
-
-                centroid_stash.retain(|_time, list| !list.is_empty());
-            }
+            done.inspect(move |c| {
+                debug!("worker {}", worker_index);
+                debug!("Finished: {:?}", c.view());
+            }).leave()
         })
-    }
-}
-
-trait EndCondition<S: Scope, D: Data> {
-    fn end_condition<C: ConvergenceCheck<D> + 'static>(
-        &self,
-        check: C,
-    ) -> (
-        Stream<S, AbomonableArray2<D>>,
-        Stream<S, AbomonableArray2<D>>,
-    );
-}
-
-impl<S: Scope<Timestamp = Product<T, usize>>, T: Timestamp, D: Data + Display> EndCondition<S, D>
-    for Stream<S, AbomonableArray2<D>>
-{
-    fn end_condition<C: ConvergenceCheck<D> + 'static>(
-        &self,
-        check: C,
-    ) -> (
-        Stream<S, AbomonableArray2<D>>,
-        Stream<S, AbomonableArray2<D>>,
-    ) {
-        let worker = self.scope().index();
-        let mut outputs = self.unary_frontier(Pipeline, "CheckConvergence", |_, _| {
-            let mut iteration_count = 0;
-            let mut centroid_stash: HashMap<_, AbomonableArray2<D>> = HashMap::new();
-
-            move |input, output| {
-                input.for_each(|cap, data| {
-                    let cap = cap.retain();
-                    assert_eq!(data.len(), 1);
-
-                    for new_centroids in data.drain(..) {
-                        let done = if let Some(previous_centroids) = centroid_stash.remove(&cap) {
-                            debug!("Checking convergence on worker {}", worker);
-                            check.converges(
-                                &previous_centroids.view(),
-                                &new_centroids.view(),
-                                iteration_count,
-                            )
-                        } else {
-                            false
-                        };
-
-                        if done {
-                            debug!("DONE!\n{}", new_centroids.view());
-                        } else {
-                            iteration_count += 1;
-                            debug!("Continue to iteration {}", iteration_count);
-
-                            // Re-Insert the current set of centroids into the stash
-                            // with the timestamp for the next iteration
-                            let delayed_cap =
-                                cap.delayed(&Product::new(cap.outer.clone(), cap.inner + 1));
-                            centroid_stash.insert(delayed_cap.clone(), new_centroids.clone());
-                        }
-
-                        output.session(&cap).give((done, new_centroids));
-                    }
-                });
-            }
-        })
-        // split the centroids off into a separate stream (out of the loop) if the computation is done
-        .partition(2, |(done, centroids)| {
-            if done { (1, centroids) } else { (0, centroids) }
-        });
-
-        (outputs.pop().unwrap(), outputs.pop().unwrap())
     }
 }

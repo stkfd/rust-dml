@@ -12,7 +12,7 @@ pub trait ConvergenceCheck<T> {
 }
 
 /// Convergence Criteria for the K-Means Algorithm.
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Abomonation)]
 pub struct ConvergenceCriteria<T> {
     pub max_iterations: Option<usize>,
     pub min_centroid_change: Option<T>

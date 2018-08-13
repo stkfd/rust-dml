@@ -3,20 +3,20 @@ use data::serialization::*;
 use data::TrainingData;
 use failure::Fail;
 use fnv::FnvHashMap;
+use models::*;
 use models::decision_tree::histogram_generics::{BaseHistogram, ContinuousValue, Median};
 use models::decision_tree::regression::histogram::Histogram;
-use models::*;
-use ndarray::prelude::*;
 use ndarray::{ScalarOperand, Zip};
+use ndarray::prelude::*;
 use num_traits::{Float, FromPrimitive, NumAssign, ToPrimitive, Zero};
 use std::collections::hash_map::Entry::*;
 use std::fmt::Debug;
 use std::marker::PhantomData;
+use timely::{Data, ExchangeData};
+use timely::dataflow::{operators::*, Scope, Stream};
 use timely::dataflow::channels::pact::Pipeline;
 use timely::dataflow::operators::generic::builder_rc::OperatorBuilder;
 use timely::dataflow::scopes::Child;
-use timely::dataflow::{operators::*, Scope, Stream};
-use timely::{Data, ExchangeData};
 
 #[derive(Clone, Abomonation)]
 pub struct GradientBoostingRegression<InnerModel, T, L> {
@@ -37,24 +37,27 @@ impl<InnerModel, T, L> GradientBoostingRegression<InnerModel, T, L> {
     }
 }
 
-impl<InnerModel: ModelAttributes, T: Data, L: Data> ModelAttributes
-    for GradientBoostingRegression<InnerModel, T, L>
+impl<InnerModel: SupModelAttributes, T: Data, L: Data> ModelAttributes
+for GradientBoostingRegression<InnerModel, T, L>
 {
-    type LabeledSamples = TrainingData<T, L>;
     type UnlabeledSamples = AbomonableArray2<T>;
-    type Predictions = AbomonableArray1<L>;
     type TrainingResult = BoostChain<InnerModel, T, L>;
+}
 
+impl<InnerModel: SupModelAttributes, T: Data, L: Data> SupModelAttributes
+for GradientBoostingRegression<InnerModel, T, L> {
+    type LabeledSamples = TrainingData<T, L>;
+    type Predictions = AbomonableArray1<L>;
     type PredictErr = InnerModel::PredictErr;
 }
 
 #[derive(Clone, Abomonation, Debug)]
-pub struct BoostChain<InnerModel: ModelAttributes, T, L>(
+pub struct BoostChain<InnerModel: SupModelAttributes, T, L>(
     pub Vec<(L, InnerModel::TrainingResult)>,
     PhantomData<(InnerModel, T, L)>,
 );
 
-impl<InnerModel: ModelAttributes, T, L> BoostChain<InnerModel, T, L> {
+impl<InnerModel: SupModelAttributes, T, L> BoostChain<InnerModel, T, L> {
     pub fn new(items: Vec<(L, InnerModel::TrainingResult)>) -> BoostChain<InnerModel, T, L> {
         BoostChain(items, PhantomData)
     }
@@ -64,20 +67,20 @@ impl<InnerModel: ModelAttributes, T, L> BoostChain<InnerModel, T, L> {
     }
 }
 
-impl<InnerModel: ModelAttributes, T, L> Default for BoostChain<InnerModel, T, L> {
+impl<InnerModel: SupModelAttributes, T, L> Default for BoostChain<InnerModel, T, L> {
     fn default() -> Self {
         Self::new(vec![])
     }
 }
 
 impl<A, InnerModel, T, L> PredictSamples<A, AbomonableArray1<L>, InnerModel::PredictErr>
-    for BoostChain<InnerModel, T, L>
-where
-    for<'a> &'a A: AsArray<'a, T, Ix2>,
-    L: Float + ScalarOperand,
-    InnerModel: ModelAttributes,
-    for<'a> InnerModel::TrainingResult:
-        PredictSamples<ArrayView2<'a, T>, AbomonableArray1<L>, InnerModel::PredictErr>,
+for BoostChain<InnerModel, T, L>
+    where
+            for<'a> &'a A: AsArray<'a, T, Ix2>,
+            L: Float + ScalarOperand,
+            InnerModel: SupModelAttributes,
+            for<'a> InnerModel::TrainingResult:
+            PredictSamples<ArrayView2<'a, T>, AbomonableArray1<L>, InnerModel::PredictErr>,
 {
     fn predict_samples(
         &self,
@@ -95,14 +98,14 @@ where
 }
 
 impl<S, T, L, InnerModel, E> Predict<S, GradientBoostingRegression<InnerModel, T, L>, E>
-    for Stream<S, AbomonableArray2<T>>
-where
-    S: Scope,
-    T: ExchangeData,
-    L: ExchangeData + Zero,
-    E: Data + Fail,
-    InnerModel: ModelAttributes,
-    BoostChain<InnerModel, T, L>: PredictSamples<AbomonableArray2<T>, AbomonableArray1<L>, E>,
+for Stream<S, AbomonableArray2<T>>
+    where
+        S: Scope,
+        T: ExchangeData,
+        L: ExchangeData + Zero,
+        E: Data + Fail,
+        InnerModel: SupModelAttributes,
+        BoostChain<InnerModel, T, L>: PredictSamples<AbomonableArray2<T>, AbomonableArray1<L>, E>,
 {
     fn predict(
         &self,
@@ -116,17 +119,17 @@ where
 }
 
 impl<S, InnerModel, T, L> TrainMeta<S, GradientBoostingRegression<InnerModel, T, L>>
-    for Stream<S, TrainingData<T, L>>
-where
-    S: Scope,
-    T: Debug + ExchangeData,
-    L: ContinuousValue + ScalarOperand + NumAssign + ToPrimitive + FromPrimitive,
-    InnerModel: ModelAttributes<Predictions = AbomonableArray1<L>>,
-    InnerModel::TrainingResult: Debug,
-    for<'b> InnerModel::TrainingResult:
+for Stream<S, TrainingData<T, L>>
+    where
+        S: Scope,
+        T: Debug + ExchangeData,
+        L: ContinuousValue + ScalarOperand + NumAssign + ToPrimitive + FromPrimitive,
+        InnerModel: SupModelAttributes<Predictions=AbomonableArray1<L>>,
+        InnerModel::TrainingResult: Debug,
+        for<'b> InnerModel::TrainingResult:
         ExchangeData
-            + PredictSamples<ArrayView2<'b, T>, AbomonableArray1<L>, InnerModel::PredictErr>,
-    for<'a> Stream<Child<'a, S, u64>, TrainingData<T, L>>: Train<Child<'a, S, u64>, InnerModel>,
+        + PredictSamples<ArrayView2<'b, T>, AbomonableArray1<L>, InnerModel::PredictErr>,
+        for<'a> Stream<Child<'a, S, u64>, TrainingData<T, L>>: Train<Child<'a, S, u64>, InnerModel>,
 {
     fn train_meta(
         &self,
@@ -167,7 +170,7 @@ pub trait CalculateResiduals<
     S: Scope,
     Model,
     TrainingData: Data,
-    InnerModel: ModelAttributes,
+    InnerModel: SupModelAttributes,
     T,
     L,
 >
@@ -184,30 +187,30 @@ pub trait CalculateResiduals<
 
 #[allow(type_complexity)]
 impl<'a, S, T, L, InnerModel>
-    CalculateResiduals<
-        'a,
-        S,
-        GradientBoostingRegression<InnerModel, T, L>,
-        TrainingData<T, L>,
-        InnerModel,
-        T,
-        L,
-    > for Stream<Child<'a, S, u64>, TrainingData<T, L>>
-where
-    T: ExchangeData + Debug,
-    L: ExchangeData
+CalculateResiduals<
+    'a,
+    S,
+    GradientBoostingRegression<InnerModel, T, L>,
+    TrainingData<T, L>,
+    InnerModel,
+    T,
+    L,
+> for Stream<Child<'a, S, u64>, TrainingData<T, L>>
+    where
+        T: ExchangeData + Debug,
+        L: ExchangeData
         + Debug
         + ContinuousValue
         + ScalarOperand
         + NumAssign
         + ToPrimitive
         + FromPrimitive,
-    S: Scope,
-    InnerModel: ModelAttributes<Predictions = AbomonableArray1<L>>,
-    for<'b> InnerModel::TrainingResult:
+        S: Scope,
+        InnerModel: SupModelAttributes<Predictions=AbomonableArray1<L>>,
+        for<'b> InnerModel::TrainingResult:
         ExchangeData
-            + Debug
-            + PredictSamples<ArrayView2<'b, T>, AbomonableArray1<L>, InnerModel::PredictErr>,
+        + Debug
+        + PredictSamples<ArrayView2<'b, T>, AbomonableArray1<L>, InnerModel::PredictErr>,
 {
     fn calculate_residuals(
         &self,
