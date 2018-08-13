@@ -1,3 +1,4 @@
+use timely::ExchangeData;
 use data::providers::{DataSourceSpec, IndexableData};
 use failure::{Error, Fail};
 use timely::dataflow::{Scope, Stream};
@@ -13,12 +14,14 @@ pub enum ModelError<Inner: Data + Fail> {
     PredictionFailed(#[cause] Inner),
 }
 
-pub trait ModelAttributes: Data {
-    type LabeledSamples: Data;
+pub trait ModelAttributes: ExchangeData {
     type UnlabeledSamples: Data;
-    type Predictions: Data;
     type TrainingResult: Data;
+}
 
+pub trait SupModelAttributes: ModelAttributes {
+    type LabeledSamples: Data;
+    type Predictions: Data;
     type PredictErr: Fail + Data;
 }
 
@@ -30,7 +33,7 @@ pub trait TrainMeta<S: Scope, M: ModelAttributes> {
     fn train_meta(&self, model: &M) -> Stream<S, M::TrainingResult>;
 }
 
-pub trait Predict<S: Scope, M: ModelAttributes, E: Data + Fail> {
+pub trait Predict<S: Scope, M: SupModelAttributes, E: Data + Fail> {
     fn predict(
         &self,
         model: &M,

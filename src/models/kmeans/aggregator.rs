@@ -60,7 +60,7 @@ where
 
     /// Assigns the given points to the given set of centroids, sums up the values of the assigned
     /// points and counts how many were assigned to each centroid.
-    pub fn consume_points<'a>(
+    pub fn assign_samples<'a>(
         &mut self,
         points: &ArrayView2<'a, T>,
         centroids: &ArrayView2<'a, T>,

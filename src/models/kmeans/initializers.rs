@@ -1,12 +1,20 @@
-use failure::Error;
 use data::providers::DataSource;
 use data::serialization::*;
+use failure::Error;
+use fnv::FnvHashMap;
 use ndarray::prelude::*;
 use ndarray::Slice;
-use ndarray_linalg::{RealScalar};
+use ndarray_linalg::RealScalar;
+use num_traits::Zero;
 use rand::Rng;
 use std::ops::{Mul, Sub};
+use timely::dataflow::channels::pact::Pipeline;
+use timely::dataflow::{
+    operators::{Exchange, Operator},
+    Scope, Stream,
+};
 use timely::Data;
+use timely::ExchangeData;
 
 pub trait KMeansInitializer<T: Data> {
     fn select_initial_centroids<D: DataSource<AbomonableArray2<T>>>(
@@ -16,7 +24,14 @@ pub trait KMeansInitializer<T: Data> {
     ) -> Result<AbomonableArray2<T>, Error>;
 }
 
-pub struct RandomSample {}
+pub trait KMeansStreamInitializer<T: Data> {
+    fn select_initial_centroids<S: Scope>(
+        samples: &Stream<S, AbomonableArray2<T>>,
+        n_centroids: usize,
+    ) -> Stream<S, AbomonableArray2<T>>;
+}
+
+pub struct RandomSample;
 
 impl<T: Data> KMeansInitializer<T> for RandomSample {
     fn select_initial_centroids<D: DataSource<AbomonableArray2<T>>>(
@@ -35,7 +50,77 @@ impl<T: Data> KMeansInitializer<T> for RandomSample {
     }
 }
 
-pub struct KMeansPlusPlus {}
+impl<T: ExchangeData + Copy + Zero> KMeansStreamInitializer<T> for RandomSample {
+    fn select_initial_centroids<S: Scope>(
+        samples: &Stream<S, AbomonableArray2<T>>,
+        n_centroids: usize,
+    ) -> Stream<S, AbomonableArray2<T>> {
+        let centroids_per_peer = (n_centroids / samples.scope().peers()) + 1;
+        samples
+            .unary(Pipeline, "SelectInitialSamples", |_default_cap, _| {
+                let mut count = centroids_per_peer;
+                move |input, output| {
+                    if count > 0 {
+                        input.for_each(|time, data| {
+                            let mut rng = ::rand::thread_rng();
+                            for datum in data.iter() {
+                                let matrix_view = datum.view();
+                                while count > 0 {
+                                    let indices: Vec<usize> = (0..centroids_per_peer
+                                        .min(matrix_view.rows()))
+                                        .map(|_| rng.gen_range(0_usize, matrix_view.rows()))
+                                        .collect();
+                                    count -= indices.len();
+                                    let final_centroids: AbomonableArray2<_> = matrix_view.select(Axis(0), &indices).into();
+                                    output.session(&time).give(final_centroids);
+                                }
+                            }
+                        });
+                    }
+                }
+            })
+            .exchange(|_| 0_u64)
+            .unary(Pipeline, "AggregateSelectedCentroids", |_, _| {
+                let mut stash = FnvHashMap::default();
+                move |input, output| {
+                    input.for_each(|cap_ref, data| {
+                        let cap = cap_ref.retain();
+                        for peer_selection in data.drain(..) {
+                            let partial_centroids = peer_selection.view();
+                            let (received, centroids) =
+                                stash.entry(cap.clone()).or_insert_with(|| {
+                                    (
+                                        0,
+                                        Some(Array2::<T>::zeros((
+                                            n_centroids,
+                                            partial_centroids.cols(),
+                                        ))),
+                                    )
+                                });
+                            let centroids = centroids.as_mut().unwrap();
+
+                            let range_end =
+                                <usize>::min(*received + partial_centroids.rows(), n_centroids);
+                            centroids
+                                .slice_mut(s![*received..range_end, ..])
+                                .assign(&partial_centroids);
+                            *received += partial_centroids.rows();
+                        }
+                    });
+
+                    stash.retain(|time, (received, centroids)| {
+                        let full = *received >= centroids.as_ref().unwrap().rows();
+                        if full {
+                            output.session(&time).give(centroids.take().unwrap().into());
+                        }
+                        full
+                    });
+                }
+            })
+    }
+}
+
+pub struct KMeansPlusPlus;
 
 impl<T: Data + RealScalar + Sub<T> + Mul<T>> KMeansInitializer<T> for KMeansPlusPlus {
     fn select_initial_centroids<D: DataSource<AbomonableArray2<T>>>(
@@ -61,9 +146,7 @@ impl<T: Data + RealScalar + Sub<T> + Mul<T>> KMeansInitializer<T> for KMeansPlus
             data.chunk_indices(5000)?
                 .map(|slice_index| {
                     (
-                        Slice::from(
-                            slice_index.start..(slice_index.start + slice_index.length),
-                        ),
+                        Slice::from(slice_index.start..(slice_index.start + slice_index.length)),
                         data.slice(slice_index).unwrap().into(),
                     )
                 })
@@ -77,9 +160,7 @@ impl<T: Data + RealScalar + Sub<T> + Mul<T>> KMeansInitializer<T> for KMeansPlus
                                     .map(|x| x.abs_sqr())
                                     .sum::<T::Real>()
                             })
-                            .min_by(|a, b| {
-                                a.partial_cmp(&b).unwrap_or(::std::cmp::Ordering::Less)
-                            })
+                            .min_by(|a, b| a.partial_cmp(&b).unwrap_or(::std::cmp::Ordering::Less))
                             .unwrap()
                     });
                     (slice, distances_chunk)
