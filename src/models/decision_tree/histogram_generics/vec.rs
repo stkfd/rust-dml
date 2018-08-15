@@ -100,14 +100,6 @@ where
     fn get_or_insert_with(&mut self, key: &usize, insert_fn: impl Fn() -> H) -> &mut H {
         self.histograms.entry(key.clone()).or_insert_with(insert_fn)
     }
-
-    fn select<'a>(&mut self, keys: impl IntoIterator<Item = &'a usize>, callback: impl Fn(&mut H)) {
-        for key in keys {
-            if let Some(entry) = self.histograms.get_mut(*key) {
-                callback(entry);
-            }
-        }
-    }
 }
 
 impl<H> VecHistogramSet<H> {

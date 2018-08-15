@@ -58,7 +58,7 @@ where
 
     /// Create a stream that produces random data
     /// using the configuration in this instance
-    pub fn to_stream<'s, S: Scope>(
+    pub fn to_stream<S: Scope>(
         &self,
         advance_by: <S::Timestamp as Timestamp>::Summary,
         end_when: S::Timestamp,

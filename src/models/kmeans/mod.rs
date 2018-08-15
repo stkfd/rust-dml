@@ -288,7 +288,7 @@ where
 
                             for &(slice_index, ref points) in &point_stash {
                                 let points_view: ArrayView<_, _> = points.into();
-                                agg.consume_points(&points_view, &centroids_view, &slice_index);
+                                agg.collect_assignment_statistics(&points_view, &centroids_view, &slice_index);
                             }
 
                             session.give(agg.into());

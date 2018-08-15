@@ -31,10 +31,6 @@ impl<T: ContinuousValue, L: DiscreteValue>
 {
     fn get(&self, key: &K) -> Option<&Inner<T, L>> { self.0.get(key) }
 
-    fn select<'a>(&mut self, keys: impl IntoIterator<Item = &'a K>, callback: impl Fn(&mut Inner<T, L>))
-    where
-        K: 'a { self.0.select(keys, callback) }
-
     fn get_mut(&mut self, key: &K) -> Option<&mut Inner<T, L>> { self.0.get_mut(key) }
 
     fn get_or_insert_with(&mut self, key: &K, insert_fn: impl Fn() -> Inner<T, L>) -> &mut Inner<T, L> { self.0.get_or_insert_with(key, insert_fn) }

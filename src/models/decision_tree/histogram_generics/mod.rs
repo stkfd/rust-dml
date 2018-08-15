@@ -17,11 +17,6 @@ pub use self::vec::{SerializableVecHistogramSet, VecHistogramSet};
 
 pub trait HistogramSet<K, H: HistogramSetItem>: Default {
     fn get(&self, key: &K) -> Option<&H>;
-
-    fn select<'a>(&mut self, keys: impl IntoIterator<Item = &'a K>, callback: impl Fn(&mut H))
-    where
-        K: 'a;
-
     fn get_mut(&mut self, key: &K) -> Option<&mut H>;
 
     fn get_or_insert_with(&mut self, key: &K, insert_fn: impl Fn() -> H) -> &mut H;
