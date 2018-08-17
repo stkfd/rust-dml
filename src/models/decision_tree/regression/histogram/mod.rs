@@ -58,6 +58,8 @@ impl<T: DiscreteValue, L: ContinuousValue, Lf: WeightedLoss<L>> FindSplits<T, L,
                         );
 
                         let merged_attribute_hist = attr_histograms
+                            .into_iter()
+                            .map(|(_key, item)| item)
                             .summarize()
                             .expect("merge all attribute histograms");
 

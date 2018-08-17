@@ -2,7 +2,7 @@ use data::dataflow::{ApplyLatest, InitEachTime};
 use data::serialization::*;
 use data::TrainingData;
 use models::decision_tree::histogram_generics::{ContinuousValue, DiscreteValue};
-use models::decision_tree::operators::{AggregateHistograms, CreateHistograms, SplitLeaves};
+use models::decision_tree::operators::{AggregateHistograms, CollectHistograms, SplitLeaves};
 use models::decision_tree::regression::histogram::loss_functions::TrimmedLadWeightedLoss;
 use models::decision_tree::regression::histogram::TargetValueHistogramSet;
 use models::decision_tree::tree::DecisionTree;

@@ -14,7 +14,7 @@ use timely::Data;
 use timely::ExchangeData;
 
 /// Extension trait for timely `Stream`
-pub trait CreateHistograms<S: Scope, T: Data, L: Data> {
+pub trait CollectHistograms<S: Scope, T: Data, L: Data> {
     /// Takes a set of `TrainingData` and a stream of decision trees (as they are created).
     /// For each decision tree, compiles a set of histograms describing the samples which
     /// arrive at each unlabeled leaf node in the tree.
@@ -26,7 +26,7 @@ pub trait CreateHistograms<S: Scope, T: Data, L: Data> {
     ) -> Stream<S, (DecisionTree<T, L>, H::Serializable)>;
 }
 
-impl<S, TsOuter, T, L> CreateHistograms<S, T, L> for Stream<S, DecisionTree<T, L>>
+impl<S, TsOuter, T, L> CollectHistograms<S, T, L> for Stream<S, DecisionTree<T, L>>
 where
     S: Scope<Timestamp = Product<TsOuter, u64>>,
     TsOuter: Timestamp,
@@ -44,14 +44,14 @@ where
             training_data,
             Pipeline,
             Pipeline,
-            "CreateHistograms",
+            "CollectHistograms",
             |_, _| {
                 let mut data_stash = FnvHashMap::default();
                 let mut tree_stash = FnvHashMap::default();
 
                 move |in_tree, in_data, out| {
                     #[cfg(feature = "profile")]
-                    flame::start("CreateHistograms");
+                    flame::start("CollectHistograms");
 
                     in_data.for_each(|cap, data| {
                         let outer_time = cap.time().outer.clone();
@@ -127,7 +127,7 @@ where
                     tree_stash.retain(|_time, tree_opt| tree_opt.is_some());
 
                     #[cfg(feature = "profile")]
-                    flame::end("CreateHistograms");
+                    flame::end("CollectHistograms");
                 }
             },
         )

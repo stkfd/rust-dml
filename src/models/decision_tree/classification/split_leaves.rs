@@ -50,7 +50,11 @@ impl<
                                         .map(|(attr, attr_histograms)| {
                                             // merge all histograms for a node & attribute, combining the ones
                                             // for individual labels
-                                            let merged_histograms = attr_histograms.summarize().expect("Summarize attribute histograms");
+                                            let merged_histograms = attr_histograms
+                                                .into_iter()
+                                                .map(|(_key, item)| item)
+                                                .summarize()
+                                                .expect("Summarize attribute histograms");
 
                                             // calculate impurity delta for each candidate split and return the highest
                                             let best_delta_and_split = merged_histograms

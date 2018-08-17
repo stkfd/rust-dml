@@ -16,24 +16,19 @@ pub use self::vec::{SerializableVecHistogramSet, VecHistogramSet};
 
 
 pub trait HistogramSet<K, H: HistogramSetItem>: Default {
+    /// Get a reference to an item in this set
     fn get(&self, key: &K) -> Option<&H>;
+    /// Get a mutable reference to an item in this set
     fn get_mut(&mut self, key: &K) -> Option<&mut H>;
 
-    fn get_or_insert_with(&mut self, key: &K, insert_fn: impl Fn() -> H) -> &mut H;
-
-    fn summarize<'a: 'b, 'b>(&'a self) -> Option<H>
-    where
-        &'a Self: IntoIterator<Item = (&'b K, &'b H)>,
-        H: 'b,
-        Self: 'a + 'b,
-        K: 'b,
-    {
-        let seed = self.into_iter().next()?.1.empty_clone();
-        Some(self.into_iter().fold(seed, |mut agg, item| {
-            agg.merge_borrowed(item.1);
-            agg
-        }))
-    }
+    /// Get a mutable reference to an item in this set if it exists,
+    /// otherwise insert the value returned by `insert_fn` and
+    /// return a reference to it
+    fn get_or_insert_with(
+        &mut self,
+        key: &K,
+        insert_fn: impl Fn() -> H
+    ) -> &mut H;
 }
 
 pub trait Summarize<H> {
@@ -96,8 +91,10 @@ pub trait HistogramSetItem: Clone {
     fn empty_clone(&self) -> Self;
 }
 
-pub trait FromData<Tr, D> {
-    fn from_data(tree: &Tr, data: &[D], bins: usize) -> Self;
+/// Navigate samples from a slice of data to their tree leaves and
+/// summarize them in a histogram set.
+pub trait FromData<Tree, D> {
+    fn from_data(tree: &Tree, data: &[D], bins: usize) -> Self;
 }
 
 pub trait FindNodeLabel<T> {
