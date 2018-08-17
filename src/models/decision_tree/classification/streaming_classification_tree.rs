@@ -86,7 +86,7 @@ where
                 .concat(&cycle)
                 .inspect(|x| info!("Begin tree iteration: {:?}", x))
                 .broadcast()
-                .create_histograms::<FeatureValueHistogramSet<T, L>>(
+                .collect_histograms::<FeatureValueHistogramSet<T, L>>(
                     &self.enter(tree_iter_scope),
                     model_attributes.bins,
                     model_attributes.points_per_worker as usize,

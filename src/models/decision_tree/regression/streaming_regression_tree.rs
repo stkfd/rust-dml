@@ -58,7 +58,7 @@ impl<S: Scope, T: DiscreteValue, L: ContinuousValue> Train<S, StreamingRegressio
                 .enter(tree_iter_scope)
                 .concat(&cycle)
                 .inspect_time(|time, _| info!("Begin decision tree iteration {}", time.inner))
-                .create_histograms::<TargetValueHistogramSet<T, L>>(
+                .collect_histograms::<TargetValueHistogramSet<T, L>>(
                     &self.enter(tree_iter_scope),
                     model.bins,
                     model.points_per_worker as usize,

@@ -18,7 +18,7 @@ pub trait CollectHistograms<S: Scope, T: Data, L: Data> {
     /// Takes a set of `TrainingData` and a stream of decision trees (as they are created).
     /// For each decision tree, compiles a set of histograms describing the samples which
     /// arrive at each unlabeled leaf node in the tree.
-    fn create_histograms<H: HistogramSetItem + FromData<DecisionTree<T, L>, TrainingData<T, L>>>(
+    fn collect_histograms<H: HistogramSetItem + FromData<DecisionTree<T, L>, TrainingData<T, L>>>(
         &self,
         training_data: &Stream<S, TrainingData<T, L>>,
         bins: usize,
@@ -33,7 +33,7 @@ where
     T: Data,
     L: Data,
 {
-    fn create_histograms<H: HistogramSetItem + FromData<DecisionTree<T, L>, TrainingData<T, L>>>(
+    fn collect_histograms<H: HistogramSetItem + FromData<DecisionTree<T, L>, TrainingData<T, L>>>(
         &self,
         training_data: &Stream<S, TrainingData<T, L>>,
         bins: usize,
