@@ -35,12 +35,12 @@ impl<T, L> StreamingRegressionTree<T, L> {
     }
 }
 
-impl<T: Data, L: Data> ModelAttributes for StreamingRegressionTree<T, L> {
+impl<T: ExchangeData, L: ExchangeData> ModelAttributes for StreamingRegressionTree<T, L> {
     type UnlabeledSamples = AbomonableArray2<T>;
     type TrainingResult = DecisionTree<T, L>;
 }
 
-impl<T: Data, L: Data> SupModelAttributes for StreamingRegressionTree<T, L> {
+impl<T: ExchangeData, L: ExchangeData> SupModelAttributes for StreamingRegressionTree<T, L> {
     type LabeledSamples = TrainingData<T, L>;
     type Predictions = AbomonableArray1<L>;
 

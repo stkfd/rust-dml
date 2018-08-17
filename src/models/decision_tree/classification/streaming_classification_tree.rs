@@ -50,7 +50,7 @@ impl<I, T, L> ModelAttributes for StreamingClassificationTree<I, T, L>
 where
     T: ExchangeData + ContinuousValue,
     L: ExchangeData + DiscreteValue,
-    I: Data + SplitImprovement<T, L, HistogramData = FeatureValueHistogramSet<T, L>>,
+    I: ExchangeData + SplitImprovement<T, L, HistogramData = FeatureValueHistogramSet<T, L>>,
 {
     type UnlabeledSamples = AbomonableArray2<T>;
     type TrainingResult = DecisionTree<T, L>;
@@ -60,7 +60,7 @@ impl<I, T, L> SupModelAttributes for StreamingClassificationTree<I, T, L>
 where
     T: ExchangeData + ContinuousValue,
     L: ExchangeData + DiscreteValue,
-    I: Data + SplitImprovement<T, L, HistogramData = FeatureValueHistogramSet<T, L>>,
+    I: ExchangeData + SplitImprovement<T, L, HistogramData = FeatureValueHistogramSet<T, L>>,
 {
     type LabeledSamples = TrainingData<T, L>;
     type Predictions = AbomonableArray1<L>;
@@ -72,7 +72,7 @@ where
     S: Scope,
     T: ExchangeData + ContinuousValue,
     L: ExchangeData + DiscreteValue,
-    I: Data + SplitImprovement<T, L, HistogramData = FeatureValueHistogramSet<T, L>>,
+    I: ExchangeData + SplitImprovement<T, L, HistogramData = FeatureValueHistogramSet<T, L>>,
 {
     fn train(
         &self,
@@ -123,7 +123,7 @@ where
     S: Scope,
     T: ExchangeData + ContinuousValue,
     L: ExchangeData + DiscreteValue,
-    I: Data + SplitImprovement<T, L, HistogramData = FeatureValueHistogramSet<T, L>>,
+    I: ExchangeData + SplitImprovement<T, L, HistogramData = FeatureValueHistogramSet<T, L>>,
 {
     fn predict(
         &self,

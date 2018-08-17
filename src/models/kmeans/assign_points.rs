@@ -68,7 +68,7 @@ where
                                         _,
                                         _,
                                     > = points.into();
-                                    agg.assign_samples(&points_view, &centroids_view, &slice_index);
+                                    agg.collect_assignment_statistics(&points_view, &centroids_view, &slice_index);
                                 }
 
                                 session.give(agg.into());

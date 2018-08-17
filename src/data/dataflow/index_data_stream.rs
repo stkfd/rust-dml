@@ -24,7 +24,7 @@ where
                     for array in data.drain(..) {
                         let start = count;
                         let length = array.view().len_of(Axis(0));
-                        count = count + length;
+                        count += length;
                         session.give((IntSliceIndex { start, length }, array));
                     }
                 });

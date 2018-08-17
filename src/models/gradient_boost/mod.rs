@@ -37,14 +37,14 @@ impl<InnerModel, T, L> GradientBoostingRegression<InnerModel, T, L> {
     }
 }
 
-impl<InnerModel: SupModelAttributes, T: Data, L: Data> ModelAttributes
+impl<InnerModel: SupModelAttributes, T: ExchangeData, L: ExchangeData> ModelAttributes
 for GradientBoostingRegression<InnerModel, T, L>
 {
     type UnlabeledSamples = AbomonableArray2<T>;
     type TrainingResult = BoostChain<InnerModel, T, L>;
 }
 
-impl<InnerModel: SupModelAttributes, T: Data, L: Data> SupModelAttributes
+impl<InnerModel: SupModelAttributes, T: ExchangeData, L: ExchangeData> SupModelAttributes
 for GradientBoostingRegression<InnerModel, T, L> {
     type LabeledSamples = TrainingData<T, L>;
     type Predictions = AbomonableArray1<L>;

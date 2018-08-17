@@ -234,14 +234,14 @@ where
     }
 }
 
-impl<T: Data, Init: Data + KMeansStreamInitializer<T>> ModelAttributes
+impl<T: ExchangeData, Init: ExchangeData + KMeansStreamInitializer<T>> ModelAttributes
     for KmeansStreaming<T, Init>
 {
     type UnlabeledSamples = AbomonableArray2<T>;
     type TrainingResult = AbomonableArray2<T>;
 }
 
-impl<T: Data, Init: Data + KMeansStreamInitializer<T>> SupModelAttributes
+impl<T: ExchangeData, Init: ExchangeData + KMeansStreamInitializer<T>> SupModelAttributes
     for KmeansStreaming<T, Init>
 {
     type LabeledSamples = TrainingData<T, T>;
@@ -259,7 +259,7 @@ impl<S, T, Init> Train<S, KmeansStreaming<T, Init>> for Stream<S, AbomonableArra
 where
     S: Scope,
     T: ExchangeData + Scalar + NumAssignOps + ScalarOperand + Float + Debug + FromPrimitive,
-    Init: Data + KMeansStreamInitializer<T>,
+    Init: ExchangeData + KMeansStreamInitializer<T>,
 {
     fn train(&self, model: &KmeansStreaming<T, Init>) -> Stream<S, AbomonableArray2<T>> {
         let n_clusters = model.n_clusters;
