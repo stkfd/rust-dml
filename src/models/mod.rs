@@ -1,6 +1,5 @@
 use timely::ExchangeData;
-use data::providers::{DataSourceSpec, IndexableData};
-use failure::{Error, Fail};
+use failure::Fail;
 use timely::dataflow::{Scope, Stream};
 use timely::Data;
 
@@ -43,20 +42,4 @@ pub trait Predict<S: Scope, M: SupModelAttributes, E: Data + Fail> {
 
 pub trait PredictSamples<Samples, Predictions, E: Data + Fail> {
     fn predict_samples(&self, input: &Samples) -> Result<Predictions, ModelError<E>>;
-}
-
-pub trait UnSupModel<Inputs: IndexableData, Predictions, TrainingOutput> {
-    /// Predict output from inputs.
-    fn predict<S: Scope, Source: DataSourceSpec<Inputs>>(
-        &mut self,
-        scope: &mut S,
-        inputs: Source,
-    ) -> Result<Stream<S, Predictions>, Error>;
-
-    /// Train the model using inputs.
-    fn train<S: Scope, Source: DataSourceSpec<Inputs>>(
-        &mut self,
-        scope: &mut S,
-        inputs: Source,
-    ) -> Result<Stream<S, TrainingOutput>, Error>;
 }
