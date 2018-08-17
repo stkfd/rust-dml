@@ -31,6 +31,7 @@ pub trait KMeansStreamInitializer<T: Data> {
     ) -> Stream<S, AbomonableArray2<T>>;
 }
 
+#[derive(Clone, Copy, Abomonation)]
 pub struct RandomSample;
 
 impl<T: Data> KMeansInitializer<T> for RandomSample {
@@ -99,11 +100,14 @@ impl<T: ExchangeData + Copy + Zero> KMeansStreamInitializer<T> for RandomSample 
                                 });
                             let centroids = centroids.as_mut().unwrap();
 
-                            let range_end =
-                                <usize>::min(*received + partial_centroids.rows(), n_centroids);
-                            centroids
-                                .slice_mut(s![*received..range_end, ..])
-                                .assign(&partial_centroids);
+                            if *received < centroids.rows() {
+                                let range_end =
+                                    <usize>::min(*received + partial_centroids.rows(), n_centroids);
+                                println!("{:?}", *received..range_end);
+                                centroids
+                                    .slice_mut(s![*received..range_end, ..])
+                                    .assign(&partial_centroids);
+                            }
                             *received += partial_centroids.rows();
                         }
                     });
@@ -113,7 +117,7 @@ impl<T: ExchangeData + Copy + Zero> KMeansStreamInitializer<T> for RandomSample 
                         if full {
                             output.session(&time).give(centroids.take().unwrap().into());
                         }
-                        full
+                        !full
                     });
                 }
             })

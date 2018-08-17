@@ -5,26 +5,20 @@ use self::assign_points::AssignPoints;
 pub use self::convergence::*;
 pub use self::initializers::KMeansInitializer;
 use self::stop_condition::StopCondition;
-use data::dataflow::{AsyncResult, IndexDataStream};
+use data::dataflow::{AsyncResult, IndexDataStream, ApplyLatest};
 use data::providers::{DataSource, DataSourceSpec};
 use data::serialization::*;
 use data::TrainingData;
 use failure::Error;
 use models::kmeans::initializers::KMeansStreamInitializer;
-use models::ModelAttributes;
-use models::SupModelAttributes;
-use models::Train;
-use models::UnSupModel;
+use models::*;
 use ndarray::indices;
 use ndarray::prelude::*;
 use ndarray::{NdProducer, ScalarOperand, Zip};
 use ndarray_linalg::{Norm, Scalar};
-use num_traits::cast::FromPrimitive;
-use num_traits::Float;
-use num_traits::NumAssignOps;
+use num_traits::{Float, NumAssignOps, cast::FromPrimitive};
 use std::collections::HashMap;
-use std::fmt::Debug;
-use std::fmt::Display;
+use std::fmt::{Display, Debug};
 use std::marker::PhantomData;
 use std::sync::mpsc;
 use timely::dataflow::channels::pact::Pipeline;
@@ -57,6 +51,17 @@ pub struct KmeansStreaming<Item: Data, Init: KMeansStreamInitializer<Item> + Dat
     cols: usize,
     end_criteria: ConvergenceCriteria<Item>,
     phantom_data: PhantomData<Init>,
+}
+
+impl<Item: Data, Init: Data + KMeansStreamInitializer<Item>> KmeansStreaming<Item, Init> {
+    pub fn new(n_clusters: usize, cols: usize, end_criteria: ConvergenceCriteria<Item>) -> Self {
+        KmeansStreaming {
+            n_clusters,
+            cols,
+            end_criteria,
+            phantom_data: PhantomData,
+        }
+    }
 }
 
 impl<Item: Data, Init: KMeansInitializer<Item>> Kmeans<Item, Init> {
@@ -245,7 +250,7 @@ impl<T: ExchangeData, Init: ExchangeData + KMeansStreamInitializer<T>> SupModelA
     for KmeansStreaming<T, Init>
 {
     type LabeledSamples = TrainingData<T, T>;
-    type Predictions = AbomonableArray1<T>;
+    type Predictions = AbomonableArray2<usize>;
     type PredictErr = KMeansError;
 }
 
@@ -309,6 +314,44 @@ where
                 debug!("worker {}", worker_index);
                 debug!("Finished: {:?}", c.view());
             }).leave()
+        })
+    }
+}
+
+impl<S, T, Init> Predict<S, KmeansStreaming<T, Init>, KMeansError>
+    for Stream<S, AbomonableArray2<T>>
+where
+    S: Scope,
+    T: ExchangeData + Scalar + NumAssignOps + ScalarOperand + Float + Debug + FromPrimitive,
+    Init: ExchangeData + KMeansStreamInitializer<T>,
+{
+    fn predict(
+        &self,
+        model: &KmeansStreaming<T, Init>,
+        train_results: Stream<S, AbomonableArray2<T>>,
+    ) -> Stream<S, Result<AbomonableArray2<usize>, ModelError<KMeansError>>> {
+        train_results.apply_latest(self, |_time, centroids, samples| {
+            let samples = samples.view();
+            let centroids = centroids.view();
+
+            let mut assignments = unsafe { Array2::<usize>::uninitialized((samples.rows(), 2)) };
+            Zip::from(assignments.genrows_mut())
+                .and(samples.genrows())
+                .and(indices(samples.genrows().raw_dim()))
+                .apply(|mut assignment, point, point_idx| {
+                    let centroid_index = centroids
+                        .outer_iter()
+                        .map(|centroid| (&point - &centroid).norm_l2())
+                        .enumerate()
+                        .min_by(|&(_, a), &(_, b)| {
+                            a.partial_cmp(&b).unwrap_or(::std::cmp::Ordering::Less)
+                        })
+                        .unwrap()
+                        .0;
+                    assignment[0] = point_idx;
+                    assignment[1] = centroid_index;
+                });
+            Ok(assignments.into())
         })
     }
 }
