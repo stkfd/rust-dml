@@ -58,7 +58,7 @@ impl<T: ExchangeData + Copy + Zero> KMeansStreamInitializer<T> for RandomSample 
     ) -> Stream<S, AbomonableArray2<T>> {
         let centroids_per_peer = (n_centroids / samples.scope().peers()) + 1;
         samples
-            .unary(Pipeline, "SelectInitialSamples", |_default_cap, _| {
+            .unary(Pipeline, "SelectRandomSamples", |_default_cap, _| {
                 let mut count = centroids_per_peer;
                 move |input, output| {
                     if count > 0 {
