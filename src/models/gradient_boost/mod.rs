@@ -221,28 +221,7 @@ where
                 )
                 .connect_loop(chain_loop_handle);
             residuals_out.connect_loop(residuals_loop_handle);
-
-            /*let data = self
-                .enter(boost_iter_scope)
-                .concat(&cycle)
-                .inspect_time(move |time, _| {
-                    debug!("W{}: Received residuals (round {})", worker, time.inner)
-                });
-
-            let training_results =
-                <Stream<_, _> as Train<_, InnerModel>>::train(&data, &model.inner_model)
-                    .inspect_time(move |time, _| {
-                        debug!(
-                            "W{}: Completed training model to residuals (round {})",
-                            worker, time.inner
-                        )
-                    });
-
-            let (residuals_stream, boost_chain_stream) =
-                data.calculate_residuals(model.clone(), &training_results);
-
-            residuals_stream.connect_loop(loop_handle);
-            boost_chain_stream*/
+            
             final_out.leave()
         })
     }
@@ -357,10 +336,6 @@ where
                             .get(&time.time().outer)
                             .expect("get original training data");
 
-                        /*let total_items = training_data_vec.iter().map(|td| td.y().len()).sum();
-                            let mut histogram =
-                                Histogram::<L, L>::new(<usize>::min(100_000, total_items));*/
-
                         // calculate residuals and send to next iteration
                         let mut session = residuals_handle.session(&time);
                         residuals_vec
@@ -380,19 +355,6 @@ where
 
                                 session.give(residuals);
                             });
-
-                        /*for (training_data, previous_predictions, added_predictions) in &data {
-                                Zip::from(&training_data.y())
-                                    .and(previous_predictions.view())
-                                    .and(added_predictions.view())
-                                    .apply(|&actual, &previous, &added| {
-                                        let diff = (actual - previous) / added;
-                                        let weight = added.abs();
-                                        histogram.insert(diff, weight);
-                                    });
-                            }*/
-
-                        //let multi = histogram.median().expect("get median");
                     }
                 }
                 residuals_stash.retain(|_time, item| !item.is_empty());
