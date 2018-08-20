@@ -21,7 +21,7 @@ use timely::dataflow::Scope;
 use timely_communication::initialize::Configuration;
 
 fn main() {
-    Logger::with_env_or_str("ml_dataflow=info,ml_dataflow::models::gradient_boost=debug")
+    Logger::with_env_or_str("ml_dataflow=warn,ml_dataflow::models::gradient_boost=debug")
         .start()
         .unwrap();
     ::timely::execute(Configuration::Process(2), move |root| {
@@ -30,8 +30,9 @@ fn main() {
         let y: Array1<f64> = arr1(&[10., 10., 12., 12., 14., 14., 16., 16.]);
 
         let points_per_worker = 500_000;
-        let regression_tree_model = StreamingRegressionTree::new(1, points_per_worker, 5, 1.0);
-        let gradient_boosting_model = GradientBoostingRegression::new(3, regression_tree_model);
+        
+        let regression_tree_model = StreamingRegressionTree::new(1, points_per_worker, 5, 1.0); // decision tree stumps
+        let gradient_boosting_model = GradientBoostingRegression::new(30, regression_tree_model, 0.2);
 
         root.dataflow::<u64, _, _>(|root_scope| {
             let training_stream = vec![
@@ -51,7 +52,7 @@ fn main() {
                     .segment_training_data(points_per_worker * segment_scope.peers() as u64)
                     .exchange_evenly()
                     .train_meta(&gradient_boosting_model)
-                    .inspect(|x| println!("Results: {:?}", x))
+                    //.inspect(|x| println!("Results: {:?}", x))
                     .leave()
             });
 

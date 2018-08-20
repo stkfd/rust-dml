@@ -5,7 +5,7 @@ use self::assign_points::AssignPoints;
 pub use self::convergence::*;
 pub use self::initializers::KMeansInitializer;
 use self::stop_condition::StopCondition;
-use data::dataflow::{IndexDataStream, ApplyLatest};
+use data::dataflow::{ApplyLatest, IndexDataStream};
 use data::serialization::*;
 use data::TrainingData;
 use models::kmeans::initializers::KMeansStreamInitializer;
@@ -14,7 +14,7 @@ use ndarray::indices;
 use ndarray::prelude::*;
 use ndarray::{NdProducer, ScalarOperand, Zip};
 use ndarray_linalg::{Norm, Scalar};
-use num_traits::{Float, NumAssignOps, cast::FromPrimitive};
+use num_traits::{cast::FromPrimitive, Float, NumAssignOps};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::marker::PhantomData;
@@ -33,16 +33,16 @@ pub mod initializers;
 mod stop_condition;
 
 #[derive(Abomonation, Clone)]
-pub struct KmeansStreaming<Item: Data, Init: KMeansStreamInitializer<Item> + Data> {
+pub struct Kmeans<Item: Data, Init: KMeansStreamInitializer<Item> + Data> {
     n_clusters: usize,
     cols: usize,
     end_criteria: ConvergenceCriteria<Item>,
     phantom_data: PhantomData<Init>,
 }
 
-impl<Item: Data, Init: Data + KMeansStreamInitializer<Item>> KmeansStreaming<Item, Init> {
+impl<Item: Data, Init: Data + KMeansStreamInitializer<Item>> Kmeans<Item, Init> {
     pub fn new(n_clusters: usize, cols: usize, end_criteria: ConvergenceCriteria<Item>) -> Self {
-        KmeansStreaming {
+        Kmeans {
             n_clusters,
             cols,
             end_criteria,
@@ -52,16 +52,14 @@ impl<Item: Data, Init: Data + KMeansStreamInitializer<Item>> KmeansStreaming<Ite
 }
 
 impl<T: ExchangeData, Init: ExchangeData + KMeansStreamInitializer<T>> ModelAttributes
-    for KmeansStreaming<T, Init>
+    for Kmeans<T, Init>
 {
-    type UnlabeledSamples = AbomonableArray2<T>;
     type TrainingResult = AbomonableArray2<T>;
 }
 
-impl<T: ExchangeData, Init: ExchangeData + KMeansStreamInitializer<T>> SupModelAttributes
-    for KmeansStreaming<T, Init>
+impl<T: ExchangeData, Init: ExchangeData + KMeansStreamInitializer<T>> LabelingModelAttributes
+    for Kmeans<T, Init>
 {
-    type LabeledSamples = TrainingData<T, T>;
     type Predictions = AbomonableArray2<usize>;
     type PredictErr = KMeansError;
 }
@@ -72,13 +70,13 @@ pub enum KMeansError {
     Unknown,
 }
 
-impl<S, T, Init> Train<S, KmeansStreaming<T, Init>> for Stream<S, AbomonableArray2<T>>
+impl<S, T, Init> Train<S, Kmeans<T, Init>> for Stream<S, AbomonableArray2<T>>
 where
     S: Scope,
     T: ExchangeData + Scalar + NumAssignOps + ScalarOperand + Float + Debug + FromPrimitive,
     Init: ExchangeData + KMeansStreamInitializer<T>,
 {
-    fn train(&self, model: &KmeansStreaming<T, Init>) -> Stream<S, AbomonableArray2<T>> {
+    fn train(&self, model: &Kmeans<T, Init>) -> Stream<S, AbomonableArray2<T>> {
         let n_clusters = model.n_clusters;
         let cols = model.cols;
 
@@ -88,27 +86,27 @@ where
             .max_iterations
             .unwrap_or(<usize>::max_value());
 
-        let initial_centroids =
-            Init::select_initial_centroids(self, n_clusters).inspect(|initial_centroids| {
-                debug!("Selected initial centroids: {:?}", initial_centroids.view());
-            });
+        let initial_centroids = Init::select_initial_centroids(self, n_clusters);
 
-        self.scope().scoped(|inner| {
-            let worker_index = inner.index();
-            debug!("Constructing worker {}", inner.index());
+        initial_centroids.inspect(|initial_centroids| {
+            debug!("Selected initial centroids: {:?}", initial_centroids.view());
+        });
 
-            let (loop_handle, loop_stream) = inner.loop_variable(max_iterations, 1);
+        self.scope().scoped(|inner_scope| {
+            let worker_index = inner_scope.index();
+            debug!("Constructing worker {}", inner_scope.index());
+
+            let (loop_handle, loop_stream) = inner_scope.loop_variable(max_iterations, 1);
 
             let (done, next_iteration) = initial_centroids
-                .enter(inner)
-                .filter(move |_| worker_index == 0)
+                .enter(inner_scope)
                 .concat(&loop_stream)
                 // checks whether the convergence criteria are met and aborts the loop
                 .stop_condition(end_criteria);
 
             next_iteration
                 .broadcast()
-                .assign_points(&(self.index_data().enter(inner)))
+                .assign_points(&(self.index_data().enter(inner_scope)))
                 .exchange(|_| 0u64)
                 .accumulate_statistics(AggregationStatistics::new(n_clusters, cols))
                 .map(move |stats| {
@@ -116,6 +114,7 @@ where
                         "Worker {}: Aggregated all assignments, calculating new centroids",
                         worker_index
                     );
+                    // re-estimate centroids
                     AggregationStatistics::from(stats)
                         .centroid_estimate()
                         .into()
@@ -130,8 +129,7 @@ where
     }
 }
 
-impl<S, T, Init> Predict<S, KmeansStreaming<T, Init>, KMeansError>
-    for Stream<S, AbomonableArray2<T>>
+impl<S, T, Init> Predict<S, Kmeans<T, Init>, KMeansError> for Stream<S, AbomonableArray2<T>>
 where
     S: Scope,
     T: ExchangeData + Scalar + NumAssignOps + ScalarOperand + Float + Debug + FromPrimitive,
@@ -139,7 +137,7 @@ where
 {
     fn predict(
         &self,
-        _model: &KmeansStreaming<T, Init>,
+        _model: &Kmeans<T, Init>,
         train_results: Stream<S, AbomonableArray2<T>>,
     ) -> Stream<S, Result<AbomonableArray2<usize>, ModelError<KMeansError>>> {
         train_results.apply_latest(self, |_time, centroids, samples| {

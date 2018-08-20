@@ -14,7 +14,7 @@ use timely::dataflow::operators::*;
 use timely::dataflow::{Scope, Stream};
 use timely::Data;
 use timely::ExchangeData;
-use models::SupModelAttributes;
+use models::LabelingModelAttributes;
 
 /// Supervised model that builds a classification tree from streaming data
 #[derive(Abomonation, Clone)]
@@ -52,17 +52,15 @@ where
     L: ExchangeData + DiscreteValue,
     I: ExchangeData + SplitImprovement<T, L, HistogramData = FeatureValueHistogramSet<T, L>>,
 {
-    type UnlabeledSamples = AbomonableArray2<T>;
     type TrainingResult = DecisionTree<T, L>;
 }
 
-impl<I, T, L> SupModelAttributes for StreamingClassificationTree<I, T, L>
+impl<I, T, L> LabelingModelAttributes for StreamingClassificationTree<I, T, L>
 where
     T: ExchangeData + ContinuousValue,
     L: ExchangeData + DiscreteValue,
     I: ExchangeData + SplitImprovement<T, L, HistogramData = FeatureValueHistogramSet<T, L>>,
 {
-    type LabeledSamples = TrainingData<T, L>;
     type Predictions = AbomonableArray1<L>;
     type PredictErr = DecisionTreeError;
 }

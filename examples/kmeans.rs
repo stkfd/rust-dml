@@ -7,9 +7,7 @@ extern crate timely_communication;
 
 use flexi_logger::Logger;
 use ml_dataflow::data::serialization::*;
-use ml_dataflow::models::kmeans::{
-    initializers::RandomSample, ConvergenceCriteria, KmeansStreaming,
-};
+use ml_dataflow::models::kmeans::{initializers::RandomSample, ConvergenceCriteria, Kmeans};
 use ml_dataflow::models::{Predict, Train};
 use ndarray::prelude::*;
 use timely::dataflow::operators::*;
@@ -32,22 +30,21 @@ fn main() {
             [5., 5., 5., 5., 5.],
         ]).into();
 
-        let end_criteria = <ConvergenceCriteria<f64>>::default().limit_iterations(5);
-        let model = <KmeansStreaming<f64, RandomSample>>::new(
-            n_clusters,
-            some_data.view().cols(),
-            end_criteria,
-        );
+        let end_criteria = <ConvergenceCriteria<f64>>::default()
+            .limit_iterations(5)
+            .centroid_change(0.5);
+        let model =
+            Kmeans::<f64, RandomSample>::new(n_clusters, some_data.view().cols(), end_criteria);
 
         root.dataflow::<usize, _, _>(|scope| {
-            let training_result = vec![some_data.clone()]
+            let training_results = vec![some_data.clone()]
                 .to_stream(scope)
                 .train(&model)
                 .inspect(|result| println!("{:?}", result.view()));
 
             vec![some_data]
                 .to_stream(scope)
-                .predict(&model, training_result)
+                .predict(&model, training_results.broadcast())
                 .inspect(|result| println!("{:?}", result.as_ref().unwrap().view()));
         });
 

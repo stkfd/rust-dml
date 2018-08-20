@@ -14,12 +14,10 @@ pub enum ModelError<Inner: Data + Fail> {
 }
 
 pub trait ModelAttributes: ExchangeData {
-    type UnlabeledSamples: Data;
     type TrainingResult: Data;
 }
 
-pub trait SupModelAttributes: ModelAttributes {
-    type LabeledSamples: Data;
+pub trait LabelingModelAttributes: ModelAttributes {
     type Predictions: Data;
     type PredictErr: Fail + Data;
 }
@@ -32,7 +30,7 @@ pub trait TrainMeta<S: Scope, M: ModelAttributes> {
     fn train_meta(&self, model: &M) -> Stream<S, M::TrainingResult>;
 }
 
-pub trait Predict<S: Scope, M: SupModelAttributes, E: Data + Fail> {
+pub trait Predict<S: Scope, M: LabelingModelAttributes, E: Data + Fail> {
     fn predict(
         &self,
         model: &M,
