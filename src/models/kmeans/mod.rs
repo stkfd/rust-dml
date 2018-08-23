@@ -7,7 +7,6 @@ pub use self::initializers::KMeansInitializer;
 use self::stop_condition::StopCondition;
 use data::dataflow::{ApplyLatest, IndexDataStream};
 use data::serialization::*;
-use data::TrainingData;
 use models::kmeans::initializers::KMeansStreamInitializer;
 use models::*;
 use ndarray::indices;

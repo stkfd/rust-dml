@@ -64,8 +64,9 @@ macro_rules! impl_array {
         impl<A> Into<Array<A, Dim<$index>>> for AbomonableArray<A, $index> {
             #[inline]
             fn into(self) -> Array<A, Dim<$index>> {
-                <Array<A, Dim<$index>>>::from_shape_vec(self.shape.strides(self.strides), self.data)
-                    .unwrap()
+                <Array<A, Dim<$index>>>::from_shape_vec(
+                    self.shape.strides(self.strides), self.data
+                ).unwrap()
             }
         }
     };
