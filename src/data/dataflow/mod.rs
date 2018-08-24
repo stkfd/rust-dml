@@ -12,16 +12,18 @@ use timely::dataflow::{Scope, Stream};
 use timely::Data;
 
 mod apply_latest;
+mod combine_each_time;
 pub mod error_measures;
 mod exchange_evenly;
-mod init_each_time;
 mod index_data_stream;
+mod init_each_time;
 pub mod random;
 
 pub use self::apply_latest::ApplyLatest;
+pub use self::combine_each_time::CombineEachTime;
 pub use self::exchange_evenly::ExchangeEvenly;
-pub use self::init_each_time::InitEachTime;
 pub use self::index_data_stream::IndexDataStream;
+pub use self::init_each_time::InitEachTime;
 
 /// A container for result data coming in asynchronously from somewhere. Internally uses the `std::sync::mpsc`
 /// channels for receiving the data.

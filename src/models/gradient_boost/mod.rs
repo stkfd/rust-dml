@@ -1,4 +1,6 @@
-use data::dataflow::ApplyLatest;
+use self::boost_chain::BoostChain;
+use self::gradient_vectors::CalculateResiduals;
+use data::dataflow::{ApplyLatest, CombineEachTime};
 use data::serialization::*;
 use data::TrainingData;
 use failure::Fail;
@@ -6,8 +8,8 @@ use fnv::FnvHashMap;
 use models::decision_tree::histogram_generics::ContinuousValue;
 use models::*;
 use ndarray::prelude::*;
-use ndarray::{ScalarOperand, Zip};
-use num_traits::{Float, FromPrimitive, NumAssign, ToPrimitive, Zero};
+use ndarray::ScalarOperand;
+use num_traits::{FromPrimitive, NumAssign, ToPrimitive, Zero};
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use timely::dataflow::channels::pact::Pipeline;
@@ -15,10 +17,9 @@ use timely::dataflow::operators::generic::source;
 use timely::dataflow::scopes::Child;
 use timely::dataflow::{operators::*, Scope, Stream};
 use timely::{Data, ExchangeData};
-use self::gradient_vectors::CalculateResiduals;
 
+mod boost_chain;
 mod gradient_vectors;
-mod extend_boost_chain;
 
 #[derive(Clone, Abomonation)]
 pub struct GradientBoostingRegression<InnerModel, T, L> {
@@ -26,7 +27,6 @@ pub struct GradientBoostingRegression<InnerModel, T, L> {
     inner_model: InnerModel,
     learning_rate: L,
     _t: PhantomData<T>,
-    _l: PhantomData<L>,
 }
 
 impl<InnerModel, T, L> GradientBoostingRegression<InnerModel, T, L> {
@@ -36,7 +36,6 @@ impl<InnerModel, T, L> GradientBoostingRegression<InnerModel, T, L> {
             inner_model,
             learning_rate,
             _t: PhantomData,
-            _l: PhantomData,
         }
     }
 }
@@ -52,54 +51,6 @@ impl<InnerModel: LabelingModelAttributes, T: ExchangeData, L: ExchangeData> Labe
 {
     type Predictions = AbomonableArray1<L>;
     type PredictErr = InnerModel::PredictErr;
-}
-
-#[derive(Clone, Abomonation, Debug)]
-pub struct BoostChain<InnerModel: LabelingModelAttributes, T, L> {
-    chain: Vec<(L, InnerModel::TrainingResult)>,
-    learning_rate: L,
-    phantom: PhantomData<(InnerModel, T, L)>,
-}
-
-impl<InnerModel: LabelingModelAttributes, T, L> BoostChain<InnerModel, T, L> {
-    pub fn new(
-        chain: Vec<(L, InnerModel::TrainingResult)>,
-        learning_rate: L,
-    ) -> BoostChain<InnerModel, T, L> {
-        BoostChain {
-            chain,
-            learning_rate,
-            phantom: PhantomData,
-        }
-    }
-
-    pub fn push_item(&mut self, scaling_factor: L, item: InnerModel::TrainingResult) {
-        self.chain.push((scaling_factor, item))
-    }
-}
-
-impl<A, InnerModel, T, L> PredictSamples<A, AbomonableArray1<L>, InnerModel::PredictErr>
-    for BoostChain<InnerModel, T, L>
-where
-    for<'a> &'a A: AsArray<'a, T, Ix2>,
-    L: Float + ScalarOperand,
-    InnerModel: LabelingModelAttributes,
-    for<'a> InnerModel::TrainingResult:
-        PredictSamples<ArrayView2<'a, T>, AbomonableArray1<L>, InnerModel::PredictErr>,
-{
-    fn predict_samples(
-        &self,
-        a: &A,
-    ) -> Result<AbomonableArray1<L>, ModelError<InnerModel::PredictErr>> {
-        let view = a.into();
-        let mut agg = Array1::zeros(view.rows());
-
-        for (scaling, training_output) in &self.chain {
-            let prediction: Array1<L> = training_output.predict_samples(&view)?.into();
-            agg = agg + prediction * self.learning_rate * *scaling;
-        }
-        Ok(agg.into())
-    }
 }
 
 impl<S, T, L, InnerModel, E> Predict<S, GradientBoostingRegression<InnerModel, T, L>, E>
@@ -179,44 +130,17 @@ where
                         worker, time.inner
                     )
                 })
-                .binary_frontier(
+                .combine_each_time(
                     &boost_chain_stream,
-                    Pipeline,
-                    Pipeline,
-                    "ExtendBoostChain",
-                    |_, _| {
-                        let mut stash = FnvHashMap::default();
-                        move |learner_result_input, boost_chain_input, output| {
-                            learner_result_input.for_each(|time, data| {
-                                let (result_vec, _boost_chain_vec) = stash
-                                    .entry(time.retain())
-                                    .or_insert_with(|| (vec![], vec![]));
-                                result_vec.extend(data.drain(..));
-                            });
-                            boost_chain_input.for_each(|time, data| {
-                                let (_result_vec, boost_chain_vec) = stash
-                                    .entry(time.retain())
-                                    .or_insert_with(|| (vec![], vec![]));
-                                boost_chain_vec.extend(data.drain(..));
-                            });
-
-                            let frontiers = &[
-                                learner_result_input.frontier(),
-                                boost_chain_input.frontier(),
-                            ];
-                            for (cap, (learner_result_vec, boost_chain_vec)) in &mut stash {
-                                if frontiers.iter().all(|f| !f.less_equal(cap.time())) {
-                                    let mut session = output.session(&cap);
-                                    for (result, mut chain) in
-                                        learner_result_vec.drain(..).zip(boost_chain_vec.drain(..))
-                                    {
-                                        chain.push_item(L::one(), result);
-                                        session.give(chain);
-                                    }
-                                }
-                            }
-                            stash.retain(|_, entry| !entry.0.is_empty() || !entry.1.is_empty());
-                        }
+                    |learner_result_vec, boost_chain_vec| {
+                        learner_result_vec
+                            .drain(..)
+                            .zip(boost_chain_vec.drain(..))
+                            .map(|(result, mut chain)| {
+                                chain.push_item(L::one(), result);
+                                chain
+                            })
+                            .collect()
                     },
                 )
                 .connect_loop(chain_loop_handle);

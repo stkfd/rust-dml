@@ -1,6 +1,22 @@
-use super::*;
-use timely::dataflow::operators::generic::builder_rc::OperatorBuilder;
+use super::boost_chain::BoostChain;
+use super::GradientBoostingRegression;
+use data::serialization::{AsView, AbomonableArray1};
+use data::TrainingData;
+use fnv::FnvHashMap;
+use models::decision_tree::histogram_generics::ContinuousValue;
+use models::LabelingModelAttributes;
+use models::PredictSamples;
+use ndarray::prelude::*;
+use ndarray::{ScalarOperand, Zip};
+use num_traits::FromPrimitive;
+use num_traits::NumAssign;
+use num_traits::ToPrimitive;
 use std::collections::hash_map::Entry::*;
+use std::fmt::Debug;
+use timely::dataflow::channels::pact::Pipeline;
+use timely::dataflow::operators::{generic::builder_rc::OperatorBuilder, *};
+use timely::dataflow::{scopes::Child, Scope, Stream};
+use timely::{Data, ExchangeData};
 
 #[allow(type_complexity)]
 pub trait CalculateResiduals<
