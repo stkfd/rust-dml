@@ -4,7 +4,6 @@ use data::dataflow::{ApplyLatest, CombineEachTime};
 use data::serialization::*;
 use data::TrainingData;
 use failure::Fail;
-use fnv::FnvHashMap;
 use models::decision_tree::histogram_generics::ContinuousValue;
 use models::*;
 use ndarray::prelude::*;
@@ -12,7 +11,6 @@ use ndarray::ScalarOperand;
 use num_traits::{FromPrimitive, NumAssign, ToPrimitive, Zero};
 use std::fmt::Debug;
 use std::marker::PhantomData;
-use timely::dataflow::channels::pact::Pipeline;
 use timely::dataflow::operators::generic::source;
 use timely::dataflow::scopes::Child;
 use timely::dataflow::{operators::*, Scope, Stream};
@@ -101,16 +99,20 @@ where
             let (residuals_loop_handle, residuals_cycle) =
                 boost_iter_scope.loop_variable(iterations - 1, 1);
 
-            let (boost_chain_stream, final_out) = source(boost_iter_scope, "InitBoosting", |cap| {
+            let chain_initializer = source(boost_iter_scope, "InitBoosting", |cap| {
                 let mut cap = Some(cap);
                 move |output| {
                     if let Some(cap) = cap.take() {
-                        output
-                            .session(&cap)
-                            .give(BoostChain::<InnerModel, T, L>::new(vec![], learning_rate));
+                        if worker == 0 {
+                            output
+                                .session(&cap)
+                                .give(BoostChain::<InnerModel, T, L>::new(vec![], learning_rate));
+                        }
                     }
                 }
-            }).filter(move |_| worker == 0)
+            });
+
+            let (boost_chain_stream, final_out) = chain_initializer
                 .concat(&chain_cycle)
                 .branch_when(move |time| time.inner >= iterations);
 
