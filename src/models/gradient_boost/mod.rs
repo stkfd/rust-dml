@@ -125,7 +125,8 @@ where
                 })
                 .calculate_residuals(model.clone(), &boost_chain_stream, &training_data);
 
-            <Stream<_, _> as Train<_, InnerModel>>::train(&residuals_out, &model.inner_model)
+            residuals_out.connect_loop(residuals_loop_handle);
+            residuals_out.train(&model.inner_model)
                 .inspect_time(move |time, _| {
                     debug!(
                         "W{}: Completed training model to residuals (round {})",
@@ -146,7 +147,6 @@ where
                     },
                 )
                 .connect_loop(chain_loop_handle);
-            residuals_out.connect_loop(residuals_loop_handle);
 
             final_out.leave()
         })
