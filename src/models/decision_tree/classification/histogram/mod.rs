@@ -355,38 +355,6 @@ impl<T: ContinuousValue, L: DiscreteValue> FindNodeLabel<L> for FeatureValueHist
     }
 }
 
-impl<'a, T: ContinuousValue, L: DiscreteValue> FromData<DecisionTree<T, L>, TrainingData<T, L>>
-    for FeatureValueHistogramSet<T, L>
-{
-    #[cfg_attr(feature="profile", flame)]
-    fn from_data(tree: &DecisionTree<T, L>, data: &[TrainingData<T, L>], bins: usize) -> Self {
-        let mut histograms = Self::default();
-
-        for training_data in data {
-            let x = training_data.x();
-            let y = training_data.y();
-
-            for (x_row, y_i) in x.outer_iter().zip(y.iter()) {
-                let node_index = tree
-                    .descend_iter(x_row)
-                    .last()
-                    .expect("Navigate to leaf node");
-                if let Node::Leaf { label: None } = tree[node_index] {
-                    for (i_attr, x_i) in x_row.iter().enumerate() {
-                        histograms
-                            .get_or_insert_with(&node_index, Default::default)
-                            .get_or_insert_with(&i_attr, Default::default)
-                            .get_or_insert_with(y_i, || BaseHistogram::new(bins))
-                            .insert(*x_i, 1);
-                    }
-                }
-            }
-        }
-
-        histograms
-    }
-}
-
 #[cfg(test)]
 mod test {
     use super::{bin, Histogram};
