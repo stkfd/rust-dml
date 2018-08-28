@@ -1,4 +1,4 @@
-use data::dataflow::{ApplyLatest};
+use data::dataflow::{ApplyLatest, InitEachTime};
 use data::serialization::*;
 use data::TrainingData;
 use models::decision_tree::classification::histogram::FeatureValueHistogramSet;
@@ -78,20 +78,15 @@ where
     ) -> Stream<S, DecisionTree<T, L>> {
         let mut scope = self.scope();
         let levels = model_attributes.levels;
+        
+        let init_tree = vec![DecisionTree::<T, L>::default()].init_each_time(self);
 
         scope.scoped::<u64, _, _>(|tree_iter_scope| {
-            let init_tree = if tree_iter_scope.index() == 0 {
-                vec![DecisionTree::<T, L>::default()]
-            } else {
-                vec![]
-            };
-
             let (loop_handle, cycle) = tree_iter_scope.loop_variable(model_attributes.levels, 1);
             let (iterate, finished_tree) = init_tree
-                .to_stream(tree_iter_scope)
+                .enter(tree_iter_scope)
                 .concat(&cycle)
                 .inspect(|x| info!("Begin tree iteration: {:?}", x))
-                .broadcast()
                 .collect_histograms::<FeatureValueHistogramSet<T, L>>(
                     &self.enter(tree_iter_scope),
                     model_attributes.bins,
@@ -108,7 +103,7 @@ where
                 })
                 .branch(move |time, _| time.inner >= levels);
 
-            iterate.connect_loop(loop_handle);
+            iterate.broadcast().connect_loop(loop_handle);
             finished_tree.leave()
         })
     }

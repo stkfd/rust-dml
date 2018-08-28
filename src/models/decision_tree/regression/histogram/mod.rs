@@ -313,6 +313,10 @@ where
                 .map(|(after_addr, _)| BinDistance::new(&merged_addr, after_addr)) {
                 self.distances.push(dist);
             }
+
+            if self.distances.len() > self.n_bins * 10 {
+                self.rebuild_distances();
+            }
         }
     }
 
