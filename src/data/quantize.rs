@@ -1,3 +1,4 @@
+use data::dataflow::random::params::{NormalParams, UniformParams};
 use probability::distribution::{Gaussian, Inverse};
 use std::cmp::Ordering;
 use std::f64::INFINITY;
@@ -38,6 +39,10 @@ impl NormalQuantizer {
         NormalQuantizer { ranges }
     }
 
+    pub fn from_distribution_params(params: NormalParams, steps: usize) -> Self {
+        Self::new(params.mean, params.std_dev, steps)
+    }
+
     pub fn quantize(&self, num: f64) -> i64 {
         self.ranges
             .iter()
@@ -62,6 +67,10 @@ impl UniformQuantizer {
         ranges.push(INFINITY);
 
         UniformQuantizer { ranges }
+    }
+
+    pub fn from_distribution_params(params: UniformParams<f64>, steps: usize) -> Self {
+        Self::new(params.low, params.high, steps)
     }
 
     pub fn quantize(&self, num: f64) -> i64 {

@@ -1,0 +1,12 @@
+[cluster]
+# list of hosts in the cluster
+hosts = []
+# worker threads per host
+workers = 4
+
+[model]
+levels = 2
+bins = 10
+points_per_worker = 10_000
+trim_ratio = 1.0
+quantize_resolution = 5

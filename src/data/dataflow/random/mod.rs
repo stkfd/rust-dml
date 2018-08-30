@@ -35,8 +35,8 @@ pub mod params {
     /// Parameters for a normal random distribution (mean & standard deviation)
     #[derive(Clone)]
     pub struct NormalParams {
-        mean: f64,
-        std_dev: f64,
+        pub mean: f64,
+        pub std_dev: f64,
     }
 
     impl NormalParams {
@@ -59,8 +59,8 @@ pub mod params {
     /// Parameters for a uniform random distribution (upper & lower bounds)
     #[derive(Clone)]
     pub struct UniformParams<T> {
-        low: T,
-        high: T,
+        pub low: T,
+        pub high: T,
     }
 
     impl<T> UniformParams<T> {
