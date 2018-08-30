@@ -6,20 +6,22 @@ workers = 2
 [[cluster.hosts]]
 address = "127.0.0.1:9890"
 [[cluster.hosts.threads]]
-data_path = "data-1-1.csv"
+data_path = "target/data-1-1.csv"
 [[cluster.hosts.threads]]
-data_path = "data-1-2.csv"
+data_path = "target/data-1-2.csv"
 
 [[cluster.hosts]]
 address = "127.0.0.1:9891"
 [[cluster.hosts.threads]]
-data_path = "data-2-1.csv"
+data_path = "target/data-2-1.csv"
 [[cluster.hosts.threads]]
-data_path = "data-2-2.csv"
+data_path = "target/data-2-2.csv"
 
 [model]
-levels = 4
-bins = 10
-points_per_worker = 10_000
+levels = 3
+bins = 5
+points_per_worker = 1_000
 trim_ratio = 1.0
-quantize_resolution = 10
+quantize_resolution = 5
+boost_stages = 300
+learning_rate = 0.05
