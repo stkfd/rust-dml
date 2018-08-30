@@ -1,6 +1,6 @@
-use failure::Error;
 use csv::{Reader as CsvReader, ReaderBuilder};
 use data::providers::{DataSource, DataSourceSpec, IntSliceIndex};
+use failure::Error;
 use itertools::Itertools;
 use serde::Deserialize;
 use std::convert::{TryFrom, TryInto};
@@ -108,8 +108,7 @@ impl<R: io::Read, B: Clone + TryInto<CsvReader<R>, Error = ::failure::Error>> Cs
     }
 }
 
-impl<Reader, ReaderBuilder, Row> DataSource<Vec<Row>>
-    for CsvProvider<Reader, ReaderBuilder>
+impl<Reader, ReaderBuilder, Row> DataSource<Vec<Row>> for CsvProvider<Reader, ReaderBuilder>
 where
     Reader: io::Read,
     ReaderBuilder: Clone + TryInto<CsvReader<Reader>, Error = ::failure::Error>,
@@ -117,7 +116,8 @@ where
     Row: Data,
 {
     fn slice(&mut self, idx: IntSliceIndex<usize>) -> Result<Vec<Row>, Error> {
-        let rows = self.builder
+        let rows = self
+            .builder
             .clone()
             .try_into()?
             .into_deserialize::<Row>()
@@ -129,7 +129,8 @@ where
     }
 
     fn all(&mut self) -> Result<Vec<Row>, Error> {
-        let rows = self.builder
+        let rows = self
+            .builder
             .clone()
             .try_into()?
             .into_deserialize::<Row>()
@@ -139,7 +140,8 @@ where
     }
 
     fn select(&mut self, indices: &[usize]) -> Result<Vec<Row>, Error> {
-        let rows_iter = self.builder
+        let rows_iter = self
+            .builder
             .clone()
             .try_into()?
             .into_deserialize::<Row>()
@@ -164,7 +166,8 @@ where
         &mut self,
         chunk_length: usize,
     ) -> Result<Box<Iterator<Item = IntSliceIndex<usize>>>, Error> {
-        let chunk_indices = self.builder
+        let chunk_indices = self
+            .builder
             .clone()
             .try_into()
             .unwrap()
@@ -229,8 +232,8 @@ mod test {
         }
         let source = CsvStringProviderSpec::new(csv.to_owned(), CsvProviderOptions::default());
         let mut provider = CsvProvider::try_from(source).expect("Create CSV provider");
-        let iterator = <DataSource<Vec<TestStruct>>>::chunk_indices(&mut provider, 10)
-            .expect("Get iterator");
+        let iterator =
+            <DataSource<Vec<TestStruct>>>::chunk_indices(&mut provider, 10).expect("Get iterator");
         assert_eq!(iterator.count(), 10);
     }
 }

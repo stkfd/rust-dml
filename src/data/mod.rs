@@ -5,9 +5,7 @@ pub mod serialization;
 
 use data::serialization::*;
 use ndarray::prelude::*;
-use serde::de::{SeqAccess, Visitor, Deserialize};
 use serde::ser::{Serialize, SerializeSeq, SerializeTuple, Serializer};
-use std::marker::PhantomData;
 
 /// Data structure to hold training data for supervised models.
 /// Holds a Matrix with input data and an Array with the
@@ -82,49 +80,5 @@ where
             seq.serialize_element(&sample)?;
         }
         seq.end()
-    }
-}
-
-struct TrainingDataVisitor<T, L> {
-    marker: PhantomData<fn() -> TrainingData<T, L>>,
-}
-
-impl<T, L> TrainingDataVisitor<T, L> {
-    fn new() -> Self {
-        TrainingDataVisitor {
-            marker: PhantomData,
-        }
-    }
-}
-
-impl<'de, T, L> Visitor<'de> for TrainingDataVisitor<T, L>
-where
-    T: Deserialize<'de>,
-    L: Deserialize<'de>,
-{
-    // The type that our Visitor is going to produce.
-    type Value = TrainingData<T, L>;
-
-    // Format a message stating what data this Visitor expects to receive.
-    fn expecting(&self, formatter: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        formatter.write_str("training data array")
-    }
-
-    // Deserialize MyMap from an abstract "map" provided by the
-    // Deserializer. The MapAccess input is a callback provided by
-    // the Deserializer to let us see each entry in the map.
-    fn visit_seq<S>(self, mut access: S) -> Result<Self::Value, S::Error>
-    where
-        S: SeqAccess<'de>,
-    {
-        let x = Vec::with_capacity(access.size_hint().unwrap_or(0));
-        let y = Vec::with_capacity(access.size_hint().unwrap_or(0));
-
-        // While there are entries remaining in the input, add them
-        // into our map.
-        while let Some(value) = access.next_element()? {
-        }
-
-        Ok()
     }
 }

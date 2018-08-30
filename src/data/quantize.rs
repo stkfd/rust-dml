@@ -39,7 +39,7 @@ impl NormalQuantizer {
         NormalQuantizer { ranges }
     }
 
-    pub fn from_distribution_params(params: NormalParams, steps: usize) -> Self {
+    pub fn from_distribution_params(params: &NormalParams, steps: usize) -> Self {
         Self::new(params.mean, params.std_dev, steps)
     }
 
@@ -69,7 +69,7 @@ impl UniformQuantizer {
         UniformQuantizer { ranges }
     }
 
-    pub fn from_distribution_params(params: UniformParams<f64>, steps: usize) -> Self {
+    pub fn from_distribution_params(params: &UniformParams<f64>, steps: usize) -> Self {
         Self::new(params.low, params.high, steps)
     }
 

@@ -20,6 +20,7 @@ use timely::dataflow::Stream;
 use ml_dataflow::data::dataflow::random::{params::*, RandRegressionTrainingSource};
 use ml_dataflow::data::{
     dataflow::error_measures::{MeasurePredictionError, Rmse},
+    providers::csv_stream::CsvTrainingDataSource,
     quantize::*,
     TrainingData, TrainingDataSample,
 };
@@ -47,14 +48,11 @@ fn main() {
         ::toml::from_str(&contents).expect("Config file format contained errors")
     };
 
-    if args.generate_data.is_some() {
-        generate_data(
-            args.generate_data.unwrap(),
-            config.model.points_per_worker as usize,
-        );
+    if args.generate_data {
+        generate_data(args.process_id, config);
     } else {
         Logger::with_env_or_str("ml_dataflow=warn").start().unwrap();
-        train(config);
+        train(args.process_id, config);
     }
 }
 
@@ -66,35 +64,24 @@ lazy_static! {
     ]);
 }
 
-fn train(config: Config) {
-    /*::timely::execute(
-        Configuration::Cluster(
-            config.cluster.workers,
-            args.process_id,
-            config.cluster.hosts.clone(),
-            true,
-        ),
+fn train(process_id: usize, config: Config) {
+    let host_addresses: Vec<_> = config
+        .cluster
+        .hosts
+        .iter()
+        .cloned()
+        .map(|host_config| host_config.address)
+        .collect();
+
+    ::timely::execute(
+        Configuration::Cluster(config.cluster.workers, process_id, host_addresses, true),
         move |root| {
-            let distribution_params = arr1(&[
-                NormalParams::new(0., 5.),
-                NormalParams::new(5., 5.),
-                NormalParams::new(10., 5.),
-            ]);
-            let distribution_quantizers = [
-                NormalQuantizer::new(0., 5., config.model.quantize_resolution),
-                NormalQuantizer::new(5., 5., config.model.quantize_resolution),
-                NormalQuantizer::new(10., 5., config.model.quantize_resolution),
-            ];
-
-            let rand_source = RandRegressionTrainingSource::new(
-                move |x: &ArrayView1<f64>, x_mapped: &mut ArrayViewMut1<i64>| {
-                    for ((i, x_quant), &x) in x_mapped.indexed_iter_mut().zip(x.iter()) {
-                        *x_quant = distribution_quantizers[i].quantize(x);
-                    }
-                    x[0] * 0.6 + x[1] * 0.3 - x[2] * 0.2
-                },
-            ).x_distributions(distribution_params);
-
+            let config = config.clone();
+            let worker_local_thread_index = root.index() - (config.cluster.workers * process_id);
+            let path = config.cluster.hosts[process_id].threads[worker_local_thread_index]
+                .data_path
+                .clone();
+            
             let model = StreamingRegressionTree::new(
                 config.model.levels,
                 config.model.points_per_worker,
@@ -102,60 +89,87 @@ fn train(config: Config) {
                 1.0,
             );
 
-            root.dataflow::<u64, _, _>(|root_scope| {
+            root.dataflow::<u64, _, _>(move |root_scope| {
                 let worker = root_scope.index();
+                println!("worker {}", worker);
 
-                let training_stream: Stream<_, TrainingData<i64, f64>> = rand_source
-                    .clone()
-                    .samples(config.model.points_per_worker as usize, 1)
-                    .to_stream(Summary::Local(1), RootTimestamp::new(1), root_scope);
+                let quantizers: Vec<_> = DIST_PARAMS
+                    .iter()
+                    .map(|dist_param| {
+                        NormalQuantizer::from_distribution_params(
+                            dist_param,
+                            config.model.quantize_resolution,
+                        )
+                    })
+                    .collect();
+
+                let training_stream: Stream<_, TrainingData<i64, f64>> = root_scope
+                    .training_data_from_csv(path, config.model.points_per_worker as usize)
+                    .map(move |training_data| {
+                        let mut x_mapped =
+                            unsafe { Array2::<i64>::uninitialized(training_data.x().dim()) };
+                        for (x_row, mut x_mapped_row) in training_data
+                            .x()
+                            .outer_iter()
+                            .zip(x_mapped.outer_iter_mut())
+                        {
+                            for (i, x_i) in x_row.indexed_iter() {
+                                x_mapped_row[i] = quantizers[i].quantize(*x_i);
+                            }
+                        }
+                        TrainingData {
+                            x: x_mapped.into(),
+                            y: training_data.y,
+                        }
+                    });
 
                 let trees = training_stream.train(&model);
 
-                let predict_data = rand_source
-                    .clone()
-                    .samples(200, 1)
-                    .to_stream(Summary::Local(1), RootTimestamp::new(1), root_scope)
-                    .inspect(|d| println!("{}", d.y()));
-
-                predict_data
+                training_stream
                     .map(|t_d| t_d.x)
                     .predict(&model, trees.broadcast())
                     .map(|res| res.expect("prediction"))
-                    .prediction_error(&predict_data.map(|t_d| t_d.y), Rmse);
+                    .prediction_error(&training_stream.map(|t_d| t_d.y), Rmse);
             });
             while root.step() {}
         },
-    ).expect("Execute dataflow");*/
-    unimplemented!()
+    ).expect("Execute dataflow");
 }
 
-fn generate_data(path: String, chunk_size: usize) {
-    ::timely::execute(Configuration::Thread, move |root| {
-        let path = path.clone();
-        let rand_source = RandRegressionTrainingSource::new(
-            move |x: &ArrayView1<f64>, x_mapped: &mut ArrayViewMut1<f64>| {
-                x_mapped.assign(x);
-                x[0] * x[0] * 0.1 + x[1] * 0.5 - x[2] * 2.
-            },
-        ).x_distributions(DIST_PARAMS.clone());
+fn generate_data(process_id: usize, config: Config) {
+    ::timely::execute(
+        Configuration::Process(config.cluster.workers),
+        move |root| {
+            let config = config.clone();
+            let thread_index = root.index();
+            let path = config.cluster.hosts[process_id].threads[thread_index]
+                .data_path
+                .clone();
 
-        root.dataflow::<u64, _, _>(move |root_scope| {
-            rand_source
-                .samples(chunk_size, 1)
-                .to_stream(Summary::Local(1), RootTimestamp::new(1), root_scope)
-                .inspect(move |data| {
-                    let file = File::create(path.clone()).expect("Open CSV file");
-                    let mut wtr = csv::Writer::from_writer(file);
-                    for (x, y) in data.x().outer_iter().zip(data.y().iter()) {
-                        wtr.serialize(TrainingDataSample::from((x, y)))
-                            .expect("serialize training data");
-                    }
-                    wtr.flush().expect("Write csv");
-                });
-        });
-        while root.step() {}
-    }).expect("Execute dataflow");
+            let rand_source = RandRegressionTrainingSource::new(
+                move |x: &ArrayView1<f64>, x_mapped: &mut ArrayViewMut1<f64>| {
+                    x_mapped.assign(x);
+                    x[0] * x[0] * 0.1 + x[1] * 0.5 - x[2] * 2.
+                },
+            ).x_distributions(DIST_PARAMS.clone());
+
+            root.dataflow::<u64, _, _>(move |root_scope| {
+                rand_source
+                    .samples(config.model.points_per_worker as usize, 1)
+                    .to_stream(Summary::Local(1), RootTimestamp::new(1), root_scope)
+                    .inspect(move |data| {
+                        let file = File::create(path.clone()).expect("Open CSV file");
+                        let mut wtr = csv::Writer::from_writer(file);
+                        for (x, y) in data.x().outer_iter().zip(data.y().iter()) {
+                            wtr.serialize(TrainingDataSample::from((x, y)))
+                                .expect("serialize training data");
+                        }
+                        wtr.flush().expect("Write csv");
+                    });
+            });
+            while root.step() {}
+        },
+    ).expect("Execute dataflow");
 }
 
 #[derive(Debug, StructOpt)]
@@ -172,22 +186,33 @@ struct Cli {
     config: String,
     /// Generate data only and save it to this path
     #[structopt(long = "generate-data")]
-    generate_data: Option<String>,
+    generate_data: bool,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 struct Config {
     cluster: ClusterConfig,
     model: ModelConfig,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 struct ClusterConfig {
-    hosts: Vec<String>,
+    hosts: Vec<HostConfig>,
     workers: usize,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
+struct HostConfig {
+    address: String,
+    threads: Vec<ThreadConfig>,
+}
+
+#[derive(Deserialize, Clone)]
+struct ThreadConfig {
+    data_path: String,
+}
+
+#[derive(Deserialize, Clone)]
 struct ModelConfig {
     levels: u64,
     bins: usize,

@@ -1,12 +1,13 @@
-use failure::Error;
 use data::serialization::*;
+use failure::Error;
 use num_traits::PrimInt;
 use std::convert::TryFrom;
 use timely::{Data, ExchangeData};
 
-pub mod operators;
-pub mod csv;
 pub mod array;
+pub mod csv;
+pub mod csv_stream;
+pub mod operators;
 
 /// Trait representing a collection of data that can be retrieved from a `DataSource`. The collection
 /// has an associated index type (`ItemIndex`) and be partitioned into chunks. Individual chunks are
@@ -16,15 +17,15 @@ pub trait IndexableData: Data {
     type SliceIndex: IndexesSlice + ExchangeData;
 }
 
-impl <T: Data> IndexableData for AbomonableArray1<T> {
+impl<T: Data> IndexableData for AbomonableArray1<T> {
     type SliceIndex = IntSliceIndex<usize>;
 }
 
-impl <T: Data> IndexableData for AbomonableArray2<T> {
+impl<T: Data> IndexableData for AbomonableArray2<T> {
     type SliceIndex = IntSliceIndex<usize>;
 }
 
-impl <T: Data> IndexableData for Vec<T> {
+impl<T: Data> IndexableData for Vec<T> {
     type SliceIndex = IntSliceIndex<usize>;
 }
 
@@ -51,7 +52,10 @@ pub trait DataSource<Collection: IndexableData> {
     fn all(&mut self) -> Result<Collection, Error>;
 
     /// Select specific rows from the data source
-    fn select(&mut self, indices: &[<Collection::SliceIndex as IndexesSlice>::Idx]) -> Result<Collection, Error>;
+    fn select(
+        &mut self,
+        indices: &[<Collection::SliceIndex as IndexesSlice>::Idx],
+    ) -> Result<Collection, Error>;
 
     /// Iterate over indices to all the item chunks of the given size in this `DataSource`
     fn chunk_indices(
