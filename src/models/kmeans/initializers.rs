@@ -27,7 +27,7 @@ pub trait KMeansStreamInitializer<T: Data> {
 #[derive(Clone, Copy, Abomonation)]
 pub struct RandomSample;
 
-impl<T: ExchangeData + Copy + Zero> KMeansStreamInitializer<T> for RandomSample {
+impl<T: ExchangeData + Copy + Num + RealScalar> KMeansStreamInitializer<T> for RandomSample {
     fn select_initial_centroids<S: Scope>(
         samples: &Stream<S, AbomonableArray2<T>>,
         n_centroids: usize,
@@ -42,7 +42,7 @@ impl<T: ExchangeData + Copy + Zero> KMeansStreamInitializer<T> for RandomSample 
 
 pub struct KMeansPlusPlus;
 
-impl<T: ExchangeData + Copy + Zero> KMeansStreamInitializer<T> for KMeansPlusPlus {
+impl<T: ExchangeData + Copy + Num + RealScalar> KMeansStreamInitializer<T> for KMeansPlusPlus {
     fn select_initial_centroids<S: Scope>(
         samples: &Stream<S, AbomonableArray2<T>>,
         n_centroids: usize,
@@ -103,7 +103,7 @@ trait AggregateCentroids<S: Scope, T: Data> {
     fn aggregate_centroids(&self, n_centroids: usize) -> Stream<S, AbomonableArray2<T>>;
 }
 
-impl<S: Scope, T: Data + Copy> AggregateCentroids<S, T> for Stream<S, AbomonableArray2<T>> {
+impl<S: Scope, T: Data + Copy + Num> AggregateCentroids<S, T> for Stream<S, AbomonableArray2<T>> {
     fn aggregate_centroids(&self, n_centroids: usize) -> Stream<S, AbomonableArray2<T>> {
         self.unary(Pipeline, "AggregateSelectedCentroids", |_, _| {
             let mut stash = FnvHashMap::default();
@@ -158,7 +158,6 @@ impl<'a, S: Scope, T: Data + Num + RealScalar, Ts: Timestamp>
         &self,
         samples: &Stream<Child<'a, S, Ts>, AbomonableArray2<T>>,
     ) -> Stream<Child<'a, S, Ts>, AbomonableArray2<T>> {
-        let rng = ::rand::thread_rng();
         self.binary_frontier(
             samples,
             Pipeline,
@@ -187,12 +186,12 @@ impl<'a, S: Scope, T: Data + Num + RealScalar, Ts: Timestamp>
 
                         if centroids_received {
                             let centroids = centroids_vec[0].view();
-                            let extended_centroids =
+                            let mut extended_centroids =
                                 Array2::zeros((centroids.rows() + 1, centroids.cols()));
                             extended_centroids.assign(&centroids);
-                            let samples = samples_stash[&cap.time().outer];
+                            let samples = samples_stash.get(&cap.time().outer).unwrap();
 
-                            let distances: Vec<_> = samples
+                            let mut distances: Vec<_> = samples
                                 .iter()
                                 .map(|samples_chunk| {
                                     samples_chunk
@@ -224,7 +223,7 @@ impl<'a, S: Scope, T: Data + Num + RealScalar, Ts: Timestamp>
                                 }
                             }
 
-                            let rand_num: T::Real = into_scalar(rng.gen()) * cumulative_distance;
+                            let rand_num: T::Real = into_scalar::<T::Real>(::rand::thread_rng().gen()) * cumulative_distance;
 
                             for (chunk_idx, chunk) in distances.iter().enumerate() {
                                 let index = match chunk.binary_search_by(|probe| {
@@ -235,8 +234,9 @@ impl<'a, S: Scope, T: Data + Num + RealScalar, Ts: Timestamp>
                                 };
 
                                 if index < chunk.len() {
+                                    let last_row = extended_centroids.rows() - 1;
                                     extended_centroids
-                                        .row_mut(extended_centroids.rows() - 1)
+                                        .row_mut(last_row)
                                         .assign(&samples[chunk_idx].view().row(index));
                                     break;
                                 }
