@@ -4,14 +4,18 @@ use failure::Error;
 use fnv::FnvHashMap;
 use ndarray::prelude::*;
 use ndarray::Slice;
+use ndarray_linalg::into_scalar;
 use ndarray_linalg::RealScalar;
+use num_traits::Num;
 use num_traits::Zero;
 use rand::Rng;
+use std::cmp::Ordering;
 use std::ops::{Mul, Sub};
 use timely::dataflow::channels::pact::Pipeline;
+use timely::dataflow::scopes::Child;
 use timely::dataflow::{operators::*, Scope, Stream};
-use timely::Data;
-use timely::ExchangeData;
+use timely::progress::Timestamp;
+use timely::{Data, ExchangeData};
 
 pub trait KMeansStreamInitializer<T: Data> {
     fn select_initial_centroids<S: Scope>(
@@ -99,7 +103,7 @@ trait AggregateCentroids<S: Scope, T: Data> {
     fn aggregate_centroids(&self, n_centroids: usize) -> Stream<S, AbomonableArray2<T>>;
 }
 
-impl<S: Scope, T: Data + Copy + Zero> AggregateCentroids<S, T> for Stream<S, AbomonableArray2<T>> {
+impl<S: Scope, T: Data + Copy> AggregateCentroids<S, T> for Stream<S, AbomonableArray2<T>> {
     fn aggregate_centroids(&self, n_centroids: usize) -> Stream<S, AbomonableArray2<T>> {
         self.unary(Pipeline, "AggregateSelectedCentroids", |_, _| {
             let mut stash = FnvHashMap::default();
@@ -140,24 +144,110 @@ impl<S: Scope, T: Data + Copy + Zero> AggregateCentroids<S, T> for Stream<S, Abo
     }
 }
 
-trait SelectRandomDistanceWeighted<S: Scope, T: Data> {
+trait SelectRandomDistanceWeighted<'a, S: Scope, Ts: Timestamp, T: Data> {
     fn select_random_distance_weighted(
         &self,
-        samples: &Stream<S, AbomonableArray2<T>>,
-    ) -> Stream<S, AbomonableArray2<T>>;
+        samples: &Stream<Child<'a, S, Ts>, AbomonableArray2<T>>,
+    ) -> Self;
 }
 
-impl<S: Scope, T: Data> SelectRandomDistanceWeighted<S, T> for Stream<S, AbomonableArray2<T>> {
+impl<'a, S: Scope, T: Data + Num + RealScalar, Ts: Timestamp>
+    SelectRandomDistanceWeighted<'a, S, Ts, T> for Stream<Child<'a, S, Ts>, AbomonableArray2<T>>
+{
     fn select_random_distance_weighted(
         &self,
-        samples: &Stream<S, AbomonableArray2<T>>,
-    ) -> Stream<S, AbomonableArray2<T>> {
-        self.binary(
+        samples: &Stream<Child<'a, S, Ts>, AbomonableArray2<T>>,
+    ) -> Stream<Child<'a, S, Ts>, AbomonableArray2<T>> {
+        let rng = ::rand::thread_rng();
+        self.binary_frontier(
             samples,
             Pipeline,
             Pipeline,
             "SelectWeightedCentroid",
-            |_, _| |centroids_input, samples_input, output| {},
+            |_, _| {
+                let mut samples_stash = FnvHashMap::default();
+                let mut centroids_stash = FnvHashMap::default();
+                move |centroids_input, samples_input, output| {
+                    samples_input.for_each(|cap_ref, data| {
+                        samples_stash
+                            .entry(cap_ref.time().outer.clone())
+                            .or_insert_with(Vec::new)
+                            .extend(data.drain(..))
+                    });
+
+                    centroids_input.for_each(|cap_ref, data| {
+                        centroids_stash
+                            .entry(cap_ref.retain())
+                            .or_insert_with(Vec::new)
+                            .extend(data.drain(..))
+                    });
+
+                    centroids_stash.retain(|cap, centroids_vec| {
+                        let centroids_received = !centroids_input.frontier().less_equal(&cap);
+
+                        if centroids_received {
+                            let centroids = centroids_vec[0].view();
+                            let extended_centroids =
+                                Array2::zeros((centroids.rows() + 1, centroids.cols()));
+                            extended_centroids.assign(&centroids);
+                            let samples = samples_stash[&cap.time().outer];
+
+                            let distances: Vec<_> = samples
+                                .iter()
+                                .map(|samples_chunk| {
+                                    samples_chunk
+                                        .view()
+                                        .map_axis(Axis(0), |point| {
+                                            centroids
+                                                .outer_iter()
+                                                .map(|centroid| {
+                                                    (&centroid - &point)
+                                                        .iter()
+                                                        .map(|x| x.abs_sqr())
+                                                        .sum::<T::Real>()
+                                                })
+                                                .min_by(|a, b| {
+                                                    a.partial_cmp(&b)
+                                                        .unwrap_or(::std::cmp::Ordering::Less)
+                                                })
+                                                .unwrap()
+                                        })
+                                        .into_raw_vec()
+                                })
+                                .collect();
+
+                            let mut cumulative_distance = T::Real::zero();
+                            for chunk in &mut distances {
+                                for distance in chunk {
+                                    cumulative_distance = cumulative_distance + *distance;
+                                    *distance = cumulative_distance;
+                                }
+                            }
+
+                            let rand_num: T::Real = into_scalar(rng.gen()) * cumulative_distance;
+
+                            for (chunk_idx, chunk) in distances.iter().enumerate() {
+                                let index = match chunk.binary_search_by(|probe| {
+                                    probe.partial_cmp(&rand_num).unwrap_or(Ordering::Less)
+                                }) {
+                                    Ok(found) => found,
+                                    Err(insert_at) => insert_at,
+                                };
+
+                                if index < chunk.len() {
+                                    extended_centroids
+                                        .row_mut(extended_centroids.rows() - 1)
+                                        .assign(&samples[chunk_idx].view().row(index));
+                                    break;
+                                }
+                            }
+                            output.session(&cap).give(extended_centroids.into());
+                        }
+
+                        !centroids_received
+                    });
+                }
+            },
         )
     }
 }
