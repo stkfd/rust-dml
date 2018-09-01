@@ -17,6 +17,7 @@ pub mod error_measures;
 mod exchange_evenly;
 mod index_data_stream;
 mod init_each_time;
+pub mod timer;
 pub mod random;
 
 pub use self::apply_latest::ApplyLatest;
@@ -24,6 +25,7 @@ pub use self::combine_each_time::CombineEachTime;
 pub use self::exchange_evenly::ExchangeEvenly;
 pub use self::index_data_stream::IndexDataStream;
 pub use self::init_each_time::InitEachTime;
+pub use self::timer::Timer;
 
 /// A container for result data coming in asynchronously from somewhere. Internally uses the `std::sync::mpsc`
 /// channels for receiving the data.

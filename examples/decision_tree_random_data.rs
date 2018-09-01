@@ -23,7 +23,7 @@ use timely::progress::timestamp::RootTimestamp;
 use timely_communication::initialize::Configuration;
 
 fn main() {
-    let tree_levels = 4;
+    let tree_levels = 8;
     let n_threads = 8;
     let n_samples = 2_000_000;
 
@@ -83,7 +83,7 @@ fn main() {
                 .map(|res| res.expect("prediction"))
                 .prediction_error(&predict_data.map(|t_d| t_d.y), Rmse)
                 .inspect_time(move |time, d| {
-                    println!("{:?} {}", time, d);
+                    println!("RMSE {:?} {}", time, d);
                 });
         });
         while root.step() {}

@@ -1,4 +1,4 @@
-use data::dataflow::{ApplyLatest, InitEachTime};
+use data::dataflow::{ApplyLatest, InitEachTime, Timer};
 use data::serialization::*;
 use data::TrainingData;
 use models::decision_tree::histogram_generics::{ContinuousValue, DiscreteValue};
@@ -12,6 +12,7 @@ use std::marker::PhantomData;
 use timely::dataflow::operators::*;
 use timely::dataflow::{Scope, Stream};
 use timely::ExchangeData;
+use std::time::Duration;
 
 #[derive(Clone, Abomonation, Debug)]
 pub struct StreamingRegressionTree<T, L> {
@@ -55,7 +56,7 @@ impl<S: Scope, T: DiscreteValue, L: ContinuousValue> Train<S, StreamingRegressio
 
         self.scope().scoped::<u64, _, _>(|tree_iter_scope| {
             let (loop_handle, cycle) = tree_iter_scope.loop_variable(model.levels, 1);
-            let (iterate, finished_tree) = init_tree
+            let (trees, timer) = init_tree
                 .enter(tree_iter_scope)
                 .concat(&cycle)
                 .inspect_time(|time, _| info!("Begin decision tree iteration {}", time.inner))
@@ -74,7 +75,13 @@ impl<S: Scope, T: DiscreteValue, L: ContinuousValue> Train<S, StreamingRegressio
                     info!("Updated tree: {:?}", tree);
                 })
                 .map(move |(_, tree)| tree)
-                .branch(move |time, _| time.inner >= levels);
+                .timer();
+            let (iterate, finished_tree) = trees.branch(move |time, _| time.inner >= levels);
+
+            timer.inspect_time(|time, result| {
+                let d: Duration = (*result).into();
+                info!("{:?}: {:?}", time, d);
+            });
 
             iterate.broadcast().connect_loop(loop_handle);
             finished_tree.leave()

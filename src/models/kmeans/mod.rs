@@ -3,7 +3,6 @@
 use self::aggregator::*;
 use self::assign_points::AssignPoints;
 pub use self::convergence::*;
-pub use self::initializers::KMeansInitializer;
 use self::stop_condition::StopCondition;
 use data::dataflow::{ApplyLatest, IndexDataStream};
 use data::serialization::*;
