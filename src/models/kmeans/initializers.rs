@@ -1,16 +1,12 @@
-use data::providers::DataSource;
 use data::serialization::*;
-use failure::Error;
 use fnv::FnvHashMap;
 use ndarray::prelude::*;
-use ndarray::Slice;
 use ndarray_linalg::into_scalar;
 use ndarray_linalg::RealScalar;
 use num_traits::Num;
 use num_traits::Zero;
 use rand::Rng;
 use std::cmp::Ordering;
-use std::ops::{Mul, Sub};
 use timely::dataflow::channels::pact::Pipeline;
 use timely::dataflow::scopes::Child;
 use timely::dataflow::{operators::*, Scope, Stream};
@@ -223,7 +219,9 @@ impl<'a, S: Scope, T: Data + Num + RealScalar, Ts: Timestamp>
                                 }
                             }
 
-                            let rand_num: T::Real = into_scalar::<T::Real>(::rand::thread_rng().gen()) * cumulative_distance;
+                            let rand_num: T::Real =
+                                into_scalar::<T::Real>(::rand::thread_rng().gen())
+                                    * cumulative_distance;
 
                             for (chunk_idx, chunk) in distances.iter().enumerate() {
                                 let index = match chunk.binary_search_by(|probe| {
