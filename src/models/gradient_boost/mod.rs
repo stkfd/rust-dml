@@ -1,6 +1,7 @@
+use std::time::Duration;
 use self::boost_chain::BoostChain;
 use self::gradient_vectors::CalculateResiduals;
-use data::dataflow::{ApplyLatest, CombineEachTime};
+use data::dataflow::{ApplyLatest, CombineEachTime, Timer};
 use data::serialization::*;
 use data::TrainingData;
 use failure::Fail;
@@ -126,7 +127,7 @@ where
                 .calculate_residuals(model.clone(), &boost_chain_stream, &training_data);
 
             residuals_out.connect_loop(residuals_loop_handle);
-            residuals_out.train(&model.inner_model)
+            let (res, timer) = residuals_out.train(&model.inner_model)
                 .inspect_time(move |time, _| {
                     debug!(
                         "W{}: Completed training model to residuals (round {})",
@@ -146,7 +147,14 @@ where
                             .collect()
                     },
                 )
-                .connect_loop(chain_loop_handle);
+                .timer();
+
+            timer.inspect_time(|time, result| {
+                let d: Duration = (*result).into();
+                info!("{:?}: {:?}", time, d);
+            });
+
+            res.connect_loop(chain_loop_handle);
 
             final_out.leave()
         })

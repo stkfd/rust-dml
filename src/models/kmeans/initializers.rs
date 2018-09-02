@@ -119,7 +119,6 @@ impl<S: Scope, T: Data + Copy + Num> AggregateCentroids<S, T> for Stream<S, Abom
                         if *received < centroids.rows() {
                             let range_end =
                                 <usize>::min(*received + partial_centroids.rows(), n_centroids);
-                            println!("{:?}", *received..range_end);
                             centroids
                                 .slice_mut(s![*received..range_end, ..])
                                 .assign(&partial_centroids);

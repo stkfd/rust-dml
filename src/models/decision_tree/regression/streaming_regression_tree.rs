@@ -59,7 +59,7 @@ impl<S: Scope, T: DiscreteValue, L: ContinuousValue> Train<S, StreamingRegressio
             let (trees, timer) = init_tree
                 .enter(tree_iter_scope)
                 .concat(&cycle)
-                .inspect_time(|time, _| info!("Begin decision tree iteration {}", time.inner))
+                .inspect_time(|time, _| debug!("Begin decision tree iteration {}", time.inner))
                 .collect_histograms::<TargetValueHistogramSet<T, L>>(
                     &self.enter(tree_iter_scope),
                     model.bins,
@@ -68,11 +68,11 @@ impl<S: Scope, T: DiscreteValue, L: ContinuousValue> Train<S, StreamingRegressio
                 .aggregate_histograms::<TargetValueHistogramSet<T, L>>()
                 .split_leaves(model.levels, TrimmedLadWeightedLoss(model.trim_ratio))
                 .inspect_time(|time, (split_leaves, tree)| {
-                    info!(
+                    debug!(
                         "Split {} leaf nodes in iteration {}",
                         split_leaves, time.inner
                     );
-                    info!("Updated tree: {:?}", tree);
+                    debug!("Updated tree: {:?}", tree);
                 })
                 .map(move |(_, tree)| tree)
                 .timer();

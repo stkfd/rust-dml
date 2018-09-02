@@ -1,0 +1,25 @@
+[classification_trees]
+samples = 10_000_000
+threads = [1, 2, 3, 4, 6, 8]
+levels = 12
+bins = [2, 3, 5, 10, 20]
+
+[regression_trees]
+samples = 5_000_000
+threads = [1, 2, 3, 4, 6, 8]
+levels = 12
+bins = [2, 3, 5, 10]
+quantize_resolution = 20
+
+[boosted_trees]
+threads = [1, 2, 3, 4, 6, 8]
+samples = 5_000_000
+stages = [10, 25, 50, 100]
+levels = 2
+bins = 3
+quantize_resolution = 10
+learning_rate = 0.1
+
+[kmeans]
+samples = 5_000_000
+threads = [1, 2, 3, 4, 6, 8]

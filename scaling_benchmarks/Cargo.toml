@@ -1,0 +1,32 @@
+[package]
+name = "scaling_benchmarks"
+version = "0.1.0"
+authors = ["Stefan Kaufhold <cere@fastmail.fm>"]
+
+[dependencies]
+timely="0.6"
+timely_communication="0.6"
+ml_dataflow = { path = "../" }
+flexi_logger = "0.8"
+ndarray = "0.11"
+log="0.4"
+quicli = "0.3"
+toml="0.4"
+serde="1.0"
+serde_derive="1.0"
+
+[[bin]]
+name = "regression_trees"
+path = "src/regression_trees.rs"
+
+[[bin]]
+name = "classification_trees"
+path = "src/classification_trees.rs"
+
+[[bin]]
+name = "kmeans"
+path = "src/kmeans.rs"
+
+[[bin]]
+name = "boosted_trees"
+path = "src/boosted_trees.rs"

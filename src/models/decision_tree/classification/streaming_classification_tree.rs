@@ -1,4 +1,5 @@
-use data::dataflow::{ApplyLatest, InitEachTime};
+use std::time::Duration;
+use data::dataflow::{ApplyLatest, InitEachTime, Timer};
 use data::serialization::*;
 use data::TrainingData;
 use models::decision_tree::classification::histogram::FeatureValueHistogramSet;
@@ -7,6 +8,7 @@ use models::decision_tree::operators::*;
 use models::decision_tree::split_improvement::SplitImprovement;
 use models::decision_tree::tree::DecisionTree;
 use models::decision_tree::tree::DecisionTreeError;
+use models::LabelingModelAttributes;
 use models::ModelError;
 use models::{ModelAttributes, Predict, PredictSamples, Train};
 use std::marker::PhantomData;
@@ -14,7 +16,6 @@ use timely::dataflow::operators::*;
 use timely::dataflow::{Scope, Stream};
 use timely::Data;
 use timely::ExchangeData;
-use models::LabelingModelAttributes;
 
 /// Supervised model that builds a classification tree from streaming data
 #[derive(Abomonation, Clone)]
@@ -78,15 +79,15 @@ where
     ) -> Stream<S, DecisionTree<T, L>> {
         let mut scope = self.scope();
         let levels = model_attributes.levels;
-        
+
         let init_tree = vec![DecisionTree::<T, L>::default()].init_each_time(self);
 
         scope.scoped::<u64, _, _>(|tree_iter_scope| {
             let (loop_handle, cycle) = tree_iter_scope.loop_variable(model_attributes.levels, 1);
-            let (iterate, finished_tree) = init_tree
+            let (tree, timer) = init_tree
                 .enter(tree_iter_scope)
                 .concat(&cycle)
-                .inspect(|x| info!("Begin tree iteration: {:?}", x))
+                .inspect_time(|time, _x| debug!("Begin tree iteration: {:?}", time))
                 .collect_histograms::<FeatureValueHistogramSet<T, L>>(
                     &self.enter(tree_iter_scope),
                     model_attributes.bins,
@@ -101,7 +102,13 @@ where
                     info!("Split {} leaves", split_leaves);
                     tree
                 })
-                .branch(move |time, _| time.inner >= levels);
+                .timer();
+            let (iterate, finished_tree) = tree.branch(move |time, _| time.inner >= levels);
+
+            timer.inspect_time(|time, result| {
+                let d: Duration = (*result).into();
+                info!("{:?}: {:?}", time, d);
+            });
 
             iterate.broadcast().connect_loop(loop_handle);
             finished_tree.leave()
@@ -109,8 +116,7 @@ where
     }
 }
 
-impl<S, I, T, L>
-    Predict<S, StreamingClassificationTree<I, T, L>, DecisionTreeError>
+impl<S, I, T, L> Predict<S, StreamingClassificationTree<I, T, L>, DecisionTreeError>
     for Stream<S, AbomonableArray2<T>>
 where
     S: Scope,

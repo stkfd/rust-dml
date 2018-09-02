@@ -1,4 +1,5 @@
 use super::*;
+use timely::progress::{Timestamp, PathSummary};
 
 /// Configurable Source of randomly generated data
 ///
@@ -60,13 +61,14 @@ where
     /// using the configuration in this instance
     pub fn to_stream<'s, S: Scope>(
         &self,
-        scope: &Child<'s, S, u64>,
-    ) -> Stream<Child<'s, S, u64>, TrainingData<T, L>> {
+        advance_by: <S::Timestamp as Timestamp>::Summary,
+        end_when: S::Timestamp,
+        scope: &S,
+    ) -> Stream<S, TrainingData<T, L>> {
         let x_dist = self.x_dist.map(|to_dist| to_dist.to_distribution());
         let y_dist = self.y_dist.map(|to_dist| to_dist.to_distribution());
         let chunks_per_round = self.chunks_per_round;
         let samples_per_chunk = self.samples_per_chunk;
-        let rounds = self.rounds;
 
         //let params = self.clone();
         source(scope, "RandomSource", move |capability| {
@@ -100,10 +102,12 @@ where
                         }
                     }
 
-                    let mut time = cap.time().clone();
-                    time.inner += 1;
-                    *cap = cap.delayed(&time);
-                    done = time.inner >= rounds as u64;
+                    if let Some(time) = advance_by.results_in(cap.time()) {
+                        *cap = cap.delayed(&time);
+                        done = time >= end_when;
+                    } else {
+                        done = true;
+                    }
                 }
                 if done {
                     cap = None

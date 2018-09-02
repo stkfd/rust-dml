@@ -7,7 +7,6 @@ use rand::distributions::Uniform;
 use rand::prelude::*;
 use std::marker::PhantomData;
 use timely::dataflow::operators::generic::source;
-use timely::dataflow::scopes::Child;
 use timely::dataflow::Scope;
 use timely::dataflow::Stream;
 use timely::Data;
@@ -22,6 +21,7 @@ pub use self::regression::RandRegressionTrainingSource;
 pub mod params {
     use rand::distributions::uniform::SampleUniform;
     use rand::distributions::{Distribution, Normal, Uniform};
+    use rand::Rng;
 
     /// Trait for a struct that can generate an instance of an associated
     /// `Distribution<T>`
@@ -79,6 +79,21 @@ pub mod params {
             Uniform::new(self.low.clone(), self.high.clone())
         }
     }
+
+    #[derive(Clone)]
+    pub struct DummyDistribution<T>(pub T);
+    impl<T: Clone> Distribution<T> for DummyDistribution<T> {
+        fn sample<R: Rng + ?Sized>(&self, _rng: &mut R) -> T {
+            self.0.clone()
+        }
+    }
+
+    impl<T: Clone> ToDistribution<T> for DummyDistribution<T> {
+        type Dist = Self;
+        fn to_distribution(&self) -> Self::Dist {
+            self.clone()
+        }
+    }
 }
 
 #[cfg(test)]
@@ -87,8 +102,8 @@ mod test {
     use super::*;
     use timely::dataflow::operators::capture::Extract;
     use timely::dataflow::operators::*;
-    use timely::progress::timestamp::RootTimestamp;
     use timely::progress::nested::Summary;
+    use timely::progress::timestamp::RootTimestamp;
 
     #[test]
     fn random_source_f64() {
@@ -118,17 +133,15 @@ mod test {
             ]));
 
         let result = ::timely::example(move |scope| {
-            scope.scoped(|inner| {
-                source
-                    .to_stream(inner)
-                    .inspect(|data: &TrainingData<f64, f64>| {
-                        assert_eq!(data.x().dim(), (200, 3));
-                        assert_eq!(data.y().dim(), 200);
-                    })
-                    .count()
-                    .inspect(|&count| assert_eq!(2, count))
-                    .capture()
-            })
+            source
+                .to_stream(Summary::Local(1), RootTimestamp::new(1), scope)
+                .inspect(|data: &TrainingData<f64, f64>| {
+                    assert_eq!(data.x().dim(), (200, 3));
+                    assert_eq!(data.y().dim(), 200);
+                })
+                .count()
+                .inspect(|&count| assert_eq!(2, count))
+                .capture()
         }).extract();
         assert_eq!(result.len(), 3);
     }
