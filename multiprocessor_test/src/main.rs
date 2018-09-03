@@ -57,14 +57,18 @@ fn main() {
 }
 
 lazy_static! {
-    static ref DIST_PARAMS: Array1<NormalParams> = arr1(&[
-        NormalParams::new(0., 5.),
-        NormalParams::new(5., 5.),
-        NormalParams::new(10., 5.),
+    static ref DIST_PARAMS: Array1<UniformParams<f64>> = arr1(&[
+        UniformParams::new(0., 20.),
+        UniformParams::new(0., 20.),
+        UniformParams::new(0., 20.),
+        UniformParams::new(0., 20.),
+        UniformParams::new(0., 20.),
     ]);
 }
 
 fn train(process_id: usize, config: Config) {
+    let total_workers = config.cluster.hosts.len() * config.cluster.workers;
+    let samples_per_worker = config.model.samples / total_workers;
     let host_addresses: Vec<_> = config
         .cluster
         .hosts
@@ -84,7 +88,7 @@ fn train(process_id: usize, config: Config) {
 
             let base_model = StreamingRegressionTree::new(
                 config.model.levels as u64,
-                config.model.points_per_worker as u64,
+                samples_per_worker as u64,
                 config.model.bins,
                 1.0,
             );
@@ -98,7 +102,7 @@ fn train(process_id: usize, config: Config) {
                 let quantizers: Vec<_> = DIST_PARAMS
                     .iter()
                     .map(|dist_param| {
-                        NormalQuantizer::from_distribution_params(
+                        UniformQuantizer::from_distribution_params(
                             dist_param,
                             config.model.quantize_resolution,
                         )
@@ -106,7 +110,7 @@ fn train(process_id: usize, config: Config) {
                     .collect();
 
                 let training_stream: Stream<_, TrainingData<i64, f64>> = root_scope
-                    .training_data_from_csv(path, config.model.points_per_worker as usize)
+                    .training_data_from_csv(path, samples_per_worker as usize)
                     .map(move |training_data| {
                         let mut x_mapped =
                             unsafe { Array2::<i64>::uninitialized(training_data.x().dim()) };
@@ -165,6 +169,8 @@ fn train(process_id: usize, config: Config) {
 }
 
 fn generate_data(process_id: usize, config: Config) {
+    let total_workers = config.cluster.hosts.len() * config.cluster.workers;
+    let samples_per_worker = config.model.samples / total_workers;
     ::timely::execute(
         Configuration::Process(config.cluster.workers),
         move |root| {
@@ -177,13 +183,13 @@ fn generate_data(process_id: usize, config: Config) {
             let rand_source = RandRegressionTrainingSource::new(
                 move |x: &ArrayView1<f64>, x_mapped: &mut ArrayViewMut1<f64>| {
                     x_mapped.assign(x);
-                    x[0] * 0.5 + x[1] * 3. - x[2] * 2.
+                    x[0] * x[0] * 0.6 + x[1] * 0.3 - x[2] * 0.2 + x[3] * 2. + x[4] * 0.7
                 },
             ).x_distributions(DIST_PARAMS.clone());
 
             root.dataflow::<u64, _, _>(move |root_scope| {
                 rand_source
-                    .samples(config.model.points_per_worker as usize, 1)
+                    .samples(samples_per_worker as usize, 1)
                     .to_stream(Summary::Local(1), RootTimestamp::new(1), root_scope)
                     .inspect(move |data| {
                         let file = File::create(path.clone()).expect("Open CSV file");
@@ -244,7 +250,7 @@ struct ThreadConfig {
 struct ModelConfig {
     levels: usize,
     bins: usize,
-    points_per_worker: usize,
+    samples: usize,
     trim_ratio: f64,
     quantize_resolution: usize,
     boost_stages: usize,

@@ -13,7 +13,7 @@ use timely::dataflow::{operators::*, Scope, Stream};
 use timely::progress::Timestamp;
 use timely::{Data, ExchangeData};
 
-pub trait KMeansStreamInitializer<T: Data> {
+pub trait KMeansInitializer<T: Data> {
     fn select_initial_centroids<S: Scope>(
         samples: &Stream<S, AbomonableArray2<T>>,
         n_centroids: usize,
@@ -23,7 +23,7 @@ pub trait KMeansStreamInitializer<T: Data> {
 #[derive(Clone, Copy, Abomonation)]
 pub struct RandomSample;
 
-impl<T: ExchangeData + Copy + Num + RealScalar> KMeansStreamInitializer<T> for RandomSample {
+impl<T: ExchangeData + Copy + Num + RealScalar> KMeansInitializer<T> for RandomSample {
     fn select_initial_centroids<S: Scope>(
         samples: &Stream<S, AbomonableArray2<T>>,
         n_centroids: usize,
@@ -38,7 +38,7 @@ impl<T: ExchangeData + Copy + Num + RealScalar> KMeansStreamInitializer<T> for R
 
 pub struct KMeansPlusPlus;
 
-impl<T: ExchangeData + Copy + Num + RealScalar> KMeansStreamInitializer<T> for KMeansPlusPlus {
+impl<T: ExchangeData + Copy + Num + RealScalar> KMeansInitializer<T> for KMeansPlusPlus {
     fn select_initial_centroids<S: Scope>(
         samples: &Stream<S, AbomonableArray2<T>>,
         n_centroids: usize,
@@ -71,7 +71,7 @@ trait SelectRandomSamplesUniform<S: Scope, T: Data> {
 
 impl<S: Scope, T: Data + Copy> SelectRandomSamplesUniform<S, T> for Stream<S, AbomonableArray2<T>> {
     fn select_random_samples_uniform(&self, per_peer: usize) -> Stream<S, AbomonableArray2<T>> {
-        self.unary(Pipeline, "SelectRandomSamples", |_default_cap, _| {
+        self.unary(Pipeline, "SelectRandomSamples", |_, _| {
             let mut count = per_peer;
             move |input, output| {
                 if count > 0 {

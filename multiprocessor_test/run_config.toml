@@ -18,10 +18,10 @@ data_path = "target/data-2-1.csv"
 data_path = "target/data-2-2.csv"
 
 [model]
-levels = 3
-bins = 5
-points_per_worker = 1_000
+levels = 2
+bins = 3
+samples = 20_000_000
 trim_ratio = 1.0
-quantize_resolution = 5
+quantize_resolution = 10
 boost_stages = 300
 learning_rate = 0.05

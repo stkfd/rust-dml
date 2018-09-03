@@ -6,7 +6,7 @@ pub use self::convergence::*;
 use self::stop_condition::StopCondition;
 use data::dataflow::{ApplyLatest, IndexDataStream};
 use data::serialization::*;
-use models::kmeans::initializers::KMeansStreamInitializer;
+use models::kmeans::initializers::KMeansInitializer;
 use models::*;
 use ndarray::indices;
 use ndarray::prelude::*;
@@ -31,14 +31,14 @@ pub mod initializers;
 mod stop_condition;
 
 #[derive(Abomonation, Clone)]
-pub struct Kmeans<Item: Data, Init: KMeansStreamInitializer<Item> + Data> {
+pub struct Kmeans<Item: Data, Init: KMeansInitializer<Item> + Data> {
     n_clusters: usize,
     cols: usize,
     end_criteria: ConvergenceCriteria<Item>,
     phantom_data: PhantomData<Init>,
 }
 
-impl<Item: Data, Init: Data + KMeansStreamInitializer<Item>> Kmeans<Item, Init> {
+impl<Item: Data, Init: Data + KMeansInitializer<Item>> Kmeans<Item, Init> {
     pub fn new(n_clusters: usize, cols: usize, end_criteria: ConvergenceCriteria<Item>) -> Self {
         Kmeans {
             n_clusters,
@@ -49,13 +49,13 @@ impl<Item: Data, Init: Data + KMeansStreamInitializer<Item>> Kmeans<Item, Init> 
     }
 }
 
-impl<T: ExchangeData, Init: ExchangeData + KMeansStreamInitializer<T>> ModelAttributes
+impl<T: ExchangeData, Init: ExchangeData + KMeansInitializer<T>> ModelAttributes
     for Kmeans<T, Init>
 {
     type TrainingResult = AbomonableArray2<T>;
 }
 
-impl<T: ExchangeData, Init: ExchangeData + KMeansStreamInitializer<T>> LabelingModelAttributes
+impl<T: ExchangeData, Init: ExchangeData + KMeansInitializer<T>> LabelingModelAttributes
     for Kmeans<T, Init>
 {
     type Predictions = AbomonableArray2<usize>;
@@ -72,7 +72,7 @@ impl<S, T, Init> Train<S, Kmeans<T, Init>> for Stream<S, AbomonableArray2<T>>
 where
     S: Scope,
     T: ExchangeData + Scalar + NumAssignOps + ScalarOperand + Float + Debug + FromPrimitive,
-    Init: ExchangeData + KMeansStreamInitializer<T>,
+    Init: ExchangeData + KMeansInitializer<T>,
 {
     fn train(&self, model: &Kmeans<T, Init>) -> Stream<S, AbomonableArray2<T>> {
         let n_clusters = model.n_clusters;
@@ -131,7 +131,7 @@ impl<S, T, Init> Predict<S, Kmeans<T, Init>, KMeansError> for Stream<S, Abomonab
 where
     S: Scope,
     T: ExchangeData + Scalar + NumAssignOps + ScalarOperand + Float + Debug + FromPrimitive,
-    Init: ExchangeData + KMeansStreamInitializer<T>,
+    Init: ExchangeData + KMeansInitializer<T>,
 {
     fn predict(
         &self,
