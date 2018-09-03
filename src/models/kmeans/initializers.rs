@@ -121,7 +121,7 @@ impl<S: Scope, T: Data + Copy + Num> AggregateCentroids<S, T> for Stream<S, Abom
                                 <usize>::min(*received + partial_centroids.rows(), n_centroids);
                             centroids
                                 .slice_mut(s![*received..range_end, ..])
-                                .assign(&partial_centroids);
+                                .assign(&partial_centroids.slice(s![0..(range_end - *received), ..]));
                         }
                         *received += partial_centroids.rows();
                     }
